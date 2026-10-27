@@ -67,7 +67,7 @@ impl VantageApp {
         crate::diag::log(&format!("ui ready: tray={} hwnd={}", tray.is_some(), hwnd.is_some()));
         Self {
             monitor,
-            page: Page::Traffic,
+            page: start_page(),
             icons: Icons::default(),
             traffic: Default::default(),
             firewall: Default::default(),
@@ -345,6 +345,21 @@ fn status_chip(ui: &mut egui::Ui, g: Glyph, col: Color32, tip: &str) {
     theme::glyph(ui.painter(), r.shrink(6.0), g, col);
     resp.on_hover_text(tip);
     ui.add_space(4.0);
+}
+
+/// Debug builds can open on a given page (VANTAGE_START_PAGE=firewall|log|scanner|hardware|settings) for screenshots.
+fn start_page() -> Page {
+    if !cfg!(debug_assertions) {
+        return Page::Traffic;
+    }
+    match std::env::var("VANTAGE_START_PAGE").unwrap_or_default().as_str() {
+        "firewall" => Page::Firewall,
+        "log" => Page::Log,
+        "scanner" => Page::Scanner,
+        "hardware" => Page::Hardware,
+        "settings" => Page::Settings,
+        _ => Page::Traffic,
+    }
 }
 
 fn build_tray(ctx: &egui::Context, hwnd: Option<isize>, quit: Arc<AtomicBool>) -> Option<tray_icon::TrayIcon> {
