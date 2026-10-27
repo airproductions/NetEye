@@ -41,6 +41,10 @@ fn sort_devices(rows: &mut [DevRow], spec: SortSpec) {
     );
 }
 
+const HEADERS: [&str; 8] = ["", "Type", "Name", "Description", "IP", "MAC address", "Last seen", "First seen"];
+/// Column widths as shares of the table; hidden columns give theirs to the rest.
+const WEIGHTS: [f32; 8] = [0.035, 0.065, 0.17, 0.19, 0.10, 0.13, 0.16, 0.15];
+
 #[derive(Default)]
 pub struct ScannerPage {
     search: String,
@@ -117,6 +121,13 @@ impl ScannerPage {
             }
             theme::label(ui, "Auto-scan", theme::semibold(13.5), c::text());
             ui.add_space(14.0);
+            let hidden = s.store.data.settings.hidden("scanner", WEIGHTS.len());
+            let items: Vec<(u8, &str)> = (3..HEADERS.len()).map(|i| (i as u8, HEADERS[i])).collect();
+            if let Some(col) = theme::columns_menu(ui, "scanner", &items, &hidden) {
+                s.store.data.settings.toggle_hidden("scanner", col);
+                s.store.mark_dirty();
+            }
+            ui.add_space(6.0);
             theme::search_box(ui, &mut self.search, 300.0, "Search devices");
         });
 
@@ -126,13 +137,18 @@ impl ScannerPage {
         }
         let x0 = full.left() + 16.0;
         let w = full.width() - 32.0;
-        let col = |f: f32| x0 + w * f;
-        let cols = [col(0.0) + 6.0, col(0.035), col(0.10), col(0.27), col(0.46), col(0.56), col(0.69), col(0.85)];
-        let headers = ["", "Type", "Name", "Description", "IP", "MAC address", "Last seen", "First seen"];
+        let hidden = s.store.data.settings.hidden("scanner", WEIGHTS.len());
+        let lay = theme::column_layout(x0, w, &WEIGHTS, &hidden);
+        let mut cols: Vec<f32> = lay.iter().map(|l| l.0).collect();
+        cols[0] += 6.0;
+        let headers = HEADERS;
         let (hr, _) = ui.allocate_exact_size(Vec2::new(full.width(), 34.0), Sense::hover());
         ui.painter().rect_filled(hr, CornerRadius::ZERO, c::panel());
         let mut sort_changed = false;
         for (i, h) in headers.iter().enumerate() {
+            if hidden[i] {
+                continue;
+            }
             let right = if i + 1 < cols.len() { cols[i + 1] - 8.0 } else { full.right() - 8.0 };
             let rect = Rect::from_min_max(Pos2::new(cols[i], hr.top()), Pos2::new(right.max(cols[i] + 16.0), hr.bottom()));
             // The status column has no label; a dot stands in for it.
@@ -220,11 +236,19 @@ impl ScannerPage {
                     }
                 }
                 let p = ui.painter();
-                theme::text(p, Pos2::new(cols[3], y), d.vendor.as_deref().unwrap_or("Unknown vendor"), theme::regular(13.5), c::muted(), cols[4] - cols[3] - 12.0);
-                theme::text(p, Pos2::new(cols[4], y), &d.ip, theme::regular(13.5), tc, cols[5] - cols[4] - 8.0);
-                theme::text(p, Pos2::new(cols[5], y), &d.mac.to_uppercase(), theme::regular(13.5), tc, cols[6] - cols[5] - 8.0);
-                theme::text(p, Pos2::new(cols[6], y), &if online { "Now".to_string() } else { theme::date_time(d.last_seen) }, theme::regular(13.5), c::muted(), cols[7] - cols[6] - 8.0);
-                theme::text(p, Pos2::new(cols[7], y), &theme::date_time(d.first_seen), theme::regular(13.5), c::muted(), full.right() - cols[7] - 8.0);
+                let last_seen = if online { "Now".to_string() } else { theme::date_time(d.last_seen) };
+                let cells: [(usize, &str, egui::Color32); 5] = [
+                    (3, d.vendor.as_deref().unwrap_or("Unknown vendor"), c::muted()),
+                    (4, &d.ip, tc),
+                    (5, &d.mac.to_uppercase(), tc),
+                    (6, &last_seen, c::muted()),
+                    (7, &theme::date_time(d.first_seen), c::muted()),
+                ];
+                for (ci, text, color) in cells {
+                    if !hidden[ci] {
+                        theme::text(p, Pos2::new(lay[ci].0, y), text, theme::regular(13.5), color, lay[ci].1 - lay[ci].0 - 10.0);
+                    }
+                }
             }
         });
     }

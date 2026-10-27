@@ -117,6 +117,8 @@ pub struct Settings {
     pub firewall_mode: FirewallMode,
     /// Per-list sort order, keyed "traffic", "firewall", "scanner" or "hardware".
     pub sorts: BTreeMap<String, SortSpec>,
+    /// Per-table hidden column indexes, keyed "firewall" or "scanner" (the column chooser).
+    pub hidden_cols: BTreeMap<String, Vec<u8>>,
     /// Traffic view "Group by": 0 Apps, 1 Publishers, 2 Traffic types, 3 Countries.
     pub traffic_group: u8,
     /// Traffic view network filter: 0 WAN & LAN, 1 LAN only, 2 WAN only.
@@ -138,6 +140,27 @@ impl Settings {
 
     pub fn set_sort(&mut self, list: &str, spec: SortSpec) {
         self.sorts.insert(list.to_string(), spec);
+    }
+
+    /// `hidden[i]` for each of a table's `n` columns.
+    pub fn hidden(&self, table: &str, n: usize) -> Vec<bool> {
+        let mut v = vec![false; n];
+        for &i in self.hidden_cols.get(table).into_iter().flatten() {
+            if let Some(h) = v.get_mut(i as usize) {
+                *h = true;
+            }
+        }
+        v
+    }
+
+    pub fn toggle_hidden(&mut self, table: &str, col: u8) {
+        let v = self.hidden_cols.entry(table.to_string()).or_default();
+        match v.iter().position(|&c| c == col) {
+            Some(i) => {
+                v.remove(i);
+            }
+            None => v.push(col),
+        }
     }
 }
 
@@ -171,6 +194,7 @@ impl Default for Settings {
             snooze_until: None,
             firewall_mode: FirewallMode::ClickToBlock,
             sorts: BTreeMap::new(),
+            hidden_cols: BTreeMap::new(),
             traffic_group: 0,
             traffic_net: 0,
             traffic_dir: 0,

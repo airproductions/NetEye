@@ -723,6 +723,59 @@ pub fn menu_items(ui: &mut Ui, id: &str, label: &str, items: &[MenuItem], select
     picked
 }
 
+/// Column chooser: an icon button whose popup lists `items` with check marks and stays open while
+/// the user toggles. `items` is (column index, label); returns the column toggled this frame.
+pub fn columns_menu(ui: &mut Ui, id: &str, items: &[(u8, &str)], hidden: &[bool]) -> Option<u8> {
+    let resp = icon_button(ui, Glyph::Columns, 32.0, "Choose columns");
+    let popup = egui::Id::new(("columns", id));
+    if resp.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup));
+    }
+    let mut toggled = None;
+    egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.set_min_width(190.0);
+        let visible = items.iter().filter(|(c, _)| !hidden.get(*c as usize).copied().unwrap_or(false)).count();
+        for &(col, label) in items {
+            let shown = !hidden.get(col as usize).copied().unwrap_or(false);
+            // keep at least one optional column on screen
+            let locked = shown && visible <= 1;
+            let (row, rresp) = ui.allocate_exact_size(Vec2::new(190.0, 28.0), if locked { Sense::hover() } else { Sense::click() });
+            let p = ui.painter();
+            if !locked && rresp.hovered() {
+                p.rect_filled(row, CornerRadius::same(6), c::hover());
+            }
+            if shown {
+                let (x, y) = (row.left() + 9.0, row.center().y);
+                p.add(Shape::line(vec![Pos2::new(x, y), Pos2::new(x + 3.5, y + 3.5), Pos2::new(x + 10.0, y - 4.0)], Stroke::new(1.6_f32, c::accent())));
+            }
+            p.text(Pos2::new(row.left() + 28.0, row.center().y), Align2::LEFT_CENTER, label, regular(13.5), if locked { c::faint() } else { c::text() });
+            if rresp.clicked() {
+                toggled = Some(col);
+            }
+        }
+    });
+    toggled
+}
+
+/// Lays columns out across `[x0, x0 + w]` by `weights`. A hidden column gets zero width and its
+/// share goes to the visible ones in proportion. Returns (left, right) per column.
+pub fn column_layout(x0: f32, w: f32, weights: &[f32], hidden: &[bool]) -> Vec<(f32, f32)> {
+    let shown = |i: usize| !hidden.get(i).copied().unwrap_or(false);
+    let total: f32 = weights.iter().enumerate().filter(|(i, _)| shown(*i)).map(|(_, w)| *w).sum::<f32>().max(f32::EPSILON);
+    let mut x = x0;
+    weights
+        .iter()
+        .enumerate()
+        .map(|(i, wt)| {
+            let cw = if shown(i) { w * wt / total } else { 0.0 };
+            let r = (x, x + cw);
+            x += cw;
+            r
+        })
+        .collect()
+}
+
 pub fn search_box(ui: &mut Ui, value: &mut String, width: f32, hint: &str) -> Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
     let t = motion::hover(ui, resp.id, resp.hovered());
@@ -996,6 +1049,14 @@ pub fn logo_rgba(size: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn column_layout_gives_hidden_width_to_the_rest() {
+        let all = column_layout(0.0, 100.0, &[1.0, 1.0, 2.0], &[false, false, false]);
+        assert_eq!(all, vec![(0.0, 25.0), (25.0, 50.0), (50.0, 100.0)]);
+        let mid_hidden = column_layout(0.0, 90.0, &[1.0, 1.0, 1.0], &[false, true, false]);
+        assert_eq!(mid_hidden, vec![(0.0, 45.0), (45.0, 45.0), (45.0, 90.0)]);
+    }
 
     #[test]
     fn lerp_color_keeps_translucent_endpoints() {

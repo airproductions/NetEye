@@ -86,22 +86,36 @@ struct Cols {
     up: f32,
     spark: f32,
     end: f32,
+    /// Which columns are on screen (the column chooser); indexes match the sort columns.
+    show: [bool; 9],
 }
 
+/// The firewall columns the chooser can hide: (sort column, label).
+const OPTIONAL: [(u8, &str); 6] = [(3, "Publisher"), (4, "Version"), (5, "Hosts"), (6, "Download speed"), (7, "Upload speed"), (8, "Traffic")];
+
 impl Cols {
-    fn new(left: f32, width: f32) -> Self {
-        let fixed = 290.0 + 110.0 + 110.0 + 190.0 + 120.0 + 86.0 + 86.0 + 90.0;
-        let hosts_w = (width - fixed - 20.0).max(160.0);
+    fn new(left: f32, width: f32, hidden: &[bool]) -> Self {
+        let mut show = [true; 9];
+        for (i, h) in show.iter_mut().enumerate() {
+            *h = !hidden.get(i).copied().unwrap_or(false);
+        }
+        let w = |i: usize, v: f32| if show[i] { v } else { 0.0 };
+        let pre = 14.0 + 290.0 + 110.0 + 118.0 + w(3, 190.0) + w(4, 120.0);
+        let post = w(6, 70.0) + w(7, 86.0) + w(8, 86.0);
+        // the hosts column takes the slack; without it, the publisher column does
+        let flex = (width - pre - post - 20.0).max(0.0);
+        let hosts_w = if show[5] { flex.max(160.0) } else { 0.0 };
+        let pub_extra = if !show[5] && show[3] { flex } else { 0.0 };
         let app = left + 14.0;
         let inc = app + 290.0;
         let out = inc + 110.0;
         let publisher = out + 118.0;
-        let version = publisher + 190.0;
-        let hosts = version + 120.0;
-        let down = hosts + hosts_w + 70.0;
-        let up = down + 86.0;
+        let version = publisher + w(3, 190.0 + pub_extra);
+        let hosts = version + w(4, 120.0);
+        let down = hosts + hosts_w + w(6, 70.0);
+        let up = down + w(7, 86.0);
         let spark = up + 16.0;
-        Self { app, inc, out, publisher, version, hosts, down, up, spark, end: spark + 70.0 }
+        Self { app, inc, out, publisher, version, hosts, down, up, spark, end: spark + w(8, 70.0), show }
     }
 }
 
@@ -110,7 +124,8 @@ impl FirewallPage {
         let full = ui.max_rect();
         self.toolbar(ui, s, actions, full);
 
-        let cols = Cols::new(full.left(), full.width());
+        let hidden = s.store.data.settings.hidden("firewall", 9);
+        let cols = Cols::new(full.left(), full.width(), &hidden);
         let mut spec = s.store.data.settings.sort_for("firewall", NATURAL);
         if spec.col > 8 && spec.col != u8::MAX {
             spec = NATURAL;
@@ -123,14 +138,26 @@ impl FirewallPage {
         changed |= sort::header(ui, span(cols.app + 30.0, cols.inc - 8.0), "Apps", 0, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
         changed |= sort::header(ui, span(cols.inc + 8.0, cols.out - 4.0), "Incoming", 1, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
         changed |= sort::header(ui, span(cols.out + 8.0, cols.publisher - 4.0), "Outgoing", 2, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, span(cols.publisher, cols.version - 4.0), "Publisher", 3, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, span(cols.version, cols.hosts - 4.0), "Version", 4, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, span(cols.hosts, cols.down - 76.0), "Hosts", 5, &mut spec, true, NATURAL, Align2::LEFT_CENTER);
-        theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(cols.down - 30.0, hr.center().y), Vec2::splat(13.0)), Glyph::Down, c::down());
-        theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(cols.up - 30.0, hr.center().y), Vec2::splat(13.0)), Glyph::Up, c::up());
-        changed |= sort::header(ui, span(cols.down - 44.0, cols.down), "", 6, &mut spec, true, NATURAL, Align2::RIGHT_CENTER);
-        changed |= sort::header(ui, span(cols.up - 44.0, cols.up), "", 7, &mut spec, true, NATURAL, Align2::RIGHT_CENTER);
-        changed |= sort::header(ui, span(cols.spark, cols.end), "Traffic", 8, &mut spec, true, NATURAL, Align2::LEFT_CENTER);
+        if cols.show[3] {
+            changed |= sort::header(ui, span(cols.publisher, cols.version - 4.0), "Publisher", 3, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
+        }
+        if cols.show[4] {
+            changed |= sort::header(ui, span(cols.version, cols.hosts - 4.0), "Version", 4, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
+        }
+        if cols.show[5] {
+            changed |= sort::header(ui, span(cols.hosts, cols.down - 76.0), "Hosts", 5, &mut spec, true, NATURAL, Align2::LEFT_CENTER);
+        }
+        if cols.show[6] {
+            theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(cols.down - 30.0, hr.center().y), Vec2::splat(13.0)), Glyph::Down, c::down());
+            changed |= sort::header(ui, span(cols.down - 44.0, cols.down), "", 6, &mut spec, true, NATURAL, Align2::RIGHT_CENTER);
+        }
+        if cols.show[7] {
+            theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(cols.up - 30.0, hr.center().y), Vec2::splat(13.0)), Glyph::Up, c::up());
+            changed |= sort::header(ui, span(cols.up - 44.0, cols.up), "", 7, &mut spec, true, NATURAL, Align2::RIGHT_CENTER);
+        }
+        if cols.show[8] {
+            changed |= sort::header(ui, span(cols.spark, cols.end), "Traffic", 8, &mut spec, true, NATURAL, Align2::LEFT_CENTER);
+        }
         ui.painter().line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::border()));
         if changed {
             s.store.data.settings.set_sort("firewall", spec);
@@ -266,6 +293,12 @@ impl FirewallPage {
             theme::label(ui, blocked.to_string(), theme::regular(13.0), if blocked > 0 { c::bad() } else { c::muted() });
         });
         b.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let hidden = s.store.data.settings.hidden("firewall", 9);
+            if let Some(col) = theme::columns_menu(ui, "firewall", &OPTIONAL, &hidden) {
+                s.store.data.settings.toggle_hidden("firewall", col);
+                s.store.mark_dirty();
+            }
+            ui.add_space(6.0);
             theme::search_box(ui, &mut self.search, 320.0, "Search apps, publishers, hosts").on_hover_text("Filter by app name, publisher or host");
             if s.firewall_busy {
                 ui.add_space(12.0);
@@ -385,8 +418,12 @@ impl FirewallPage {
                 actions.push(Action::Block(key.to_string(), dir, !blocked));
             }
         }
-        theme::text(&p, Pos2::new(cols.publisher, cy), rec.publisher.as_deref().unwrap_or("—"), theme::regular(13.5), c::muted(), 180.0);
-        theme::text(&p, Pos2::new(cols.version, cy), rec.version.as_deref().unwrap_or("—"), theme::regular(13.5), c::muted(), 110.0);
+        if cols.show[3] {
+            theme::text(&p, Pos2::new(cols.publisher, cy), rec.publisher.as_deref().unwrap_or("—"), theme::regular(13.5), c::muted(), cols.version - cols.publisher - 10.0);
+        }
+        if cols.show[4] {
+            theme::text(&p, Pos2::new(cols.version, cy), rec.version.as_deref().unwrap_or("—"), theme::regular(13.5), c::muted(), 110.0);
+        }
 
         // hosts: current first, "+N more" chip
         let mut hosts: Vec<String> = live.conns.iter().filter_map(|c| c.host.clone().or_else(|| (!crate::net::is_local(&c.remote) && c.proto == Proto::Tcp).then(|| c.remote.to_string()))).collect();
@@ -396,8 +433,8 @@ impl FirewallPage {
                 hosts.push(h.clone());
             }
         }
-        let hosts_w = cols.down - 70.0 - cols.hosts;
-        if let Some(first) = hosts.first() {
+        let hosts_w = cols.down - if cols.show[6] { 70.0 } else { 0.0 } - cols.hosts;
+        if let (Some(first), true) = (hosts.first(), cols.show[5]) {
             theme::glyph(&p, Rect::from_center_size(Pos2::new(cols.hosts + 7.0, cy), Vec2::splat(13.0)), Glyph::Globe, c::faint());
             let tr = theme::text(&p, Pos2::new(cols.hosts + 20.0, cy), first, theme::regular(13.5), c::text(), hosts_w - 100.0);
             if hosts.len() > 1 {
@@ -409,13 +446,13 @@ impl FirewallPage {
                 ui.interact(chip, ui.id().with((key, "hosts")), Sense::hover()).on_hover_text(all);
             }
         }
-        if live.rate[0] > 0 {
+        if live.rate[0] > 0 && cols.show[6] {
             theme::text_right(&p, Pos2::new(cols.down, cy), &theme::rate(live.rate[0] as f64), theme::regular(13.5), c::text());
         }
-        if live.rate[1] > 0 {
+        if live.rate[1] > 0 && cols.show[7] {
             theme::text_right(&p, Pos2::new(cols.up, cy), &theme::rate(live.rate[1] as f64), theme::regular(13.5), c::text());
         }
-        if let Some((d, u)) = spark {
+        if let (Some((d, u)), true) = (spark, cols.show[8]) {
             theme::spark(&p, Rect::from_min_max(Pos2::new(cols.spark, cy - 11.0), Pos2::new(cols.end - 6.0, cy + 11.0)), d, u);
         }
 
@@ -438,13 +475,18 @@ impl FirewallPage {
                 let host = cv.host.clone().unwrap_or_else(|| cv.remote.to_string());
                 p.text(Pos2::new(cols.app + 48.0, y), Align2::LEFT_CENTER, if cv.inbound { "↘ Incoming" } else { "↗ Outgoing" }, theme::regular(12.5), c::muted());
                 p.text(Pos2::new(cols.inc + 8.0, y), Align2::LEFT_CENTER, cv.state.label(), theme::regular(12.5), c::muted());
-                p.text(Pos2::new(cols.publisher, y), Align2::LEFT_CENTER, format!("PID {}", cv.pid), theme::regular(12.5), c::faint());
-                p.text(Pos2::new(cols.version, y), Align2::LEFT_CENTER, format!("Port {}", cv.remote_port), theme::regular(12.5), c::faint());
-                theme::text(p, Pos2::new(cols.hosts + 20.0, y), &format!("{host}  ·  {}", cv.remote), theme::regular(12.5), c::text(), hosts_w - 30.0);
-                if cv.rate[0] > 0 {
+                // PID and port sit under Publisher, or after the state when Publisher is hidden
+                let px = if cols.show[3] { cols.publisher } else { cols.out + 8.0 };
+                p.text(Pos2::new(px, y), Align2::LEFT_CENTER, format!("PID {}  ·  Port {}", cv.pid, cv.remote_port), theme::regular(12.5), c::faint());
+                if cols.show[5] {
+                    theme::text(p, Pos2::new(cols.hosts + 20.0, y), &format!("{host}  ·  {}", cv.remote), theme::regular(12.5), c::text(), hosts_w - 30.0);
+                } else {
+                    theme::text(p, Pos2::new(px + 180.0, y), &format!("{host}  ·  {}", cv.remote), theme::regular(12.5), c::text(), (cols.down - px - 200.0).max(80.0));
+                }
+                if cv.rate[0] > 0 && cols.show[6] {
                     theme::text_right(p, Pos2::new(cols.down, y), &theme::rate(cv.rate[0] as f64), theme::regular(12.5), c::muted());
                 }
-                if cv.rate[1] > 0 {
+                if cv.rate[1] > 0 && cols.show[7] {
                     theme::text_right(p, Pos2::new(cols.up, y), &theme::rate(cv.rate[1] as f64), theme::regular(12.5), c::muted());
                 }
             }

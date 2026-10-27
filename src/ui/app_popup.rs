@@ -14,9 +14,9 @@ use crate::monitor::{Monitor, Shared, OTHER_KEY, SYSTEM_KEY};
 use crate::store::{AppRecord, Event};
 use crate::system::Dir;
 
-const SIZE: Vec2 = Vec2::new(470.0, 340.0);
+const SIZE: Vec2 = Vec2::new(470.0, 360.0);
 const PAD: f32 = 14.0;
-const BODY_H: f32 = 184.0;
+const BODY_H: f32 = 204.0;
 const MENU_W: f32 = 190.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -90,11 +90,14 @@ fn sha256_file(path: &Path) -> io::Result<String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// The Path / Version / Publisher rows; missing values read "—", and a missing publisher "Unknown".
+/// The Name / Path / Version / Publisher rows; missing values read "—", and a missing publisher "Unknown".
 pub fn info_rows(rec: Option<&AppRecord>) -> Vec<(&'static str, String)> {
     let dash = || "—".to_string();
+    let path = rec.and_then(|r| r.path.clone());
+    let file = path.as_deref().and_then(|p| Path::new(p).file_name()).map(|f| f.to_string_lossy().to_string());
     vec![
-        ("Path", rec.and_then(|r| r.path.clone()).unwrap_or_else(dash)),
+        ("Name", file.unwrap_or_else(dash)),
+        ("Path", path.unwrap_or_else(dash)),
         ("Version", rec.and_then(|r| r.version.clone()).unwrap_or_else(dash)),
         ("Publisher", rec.and_then(|r| r.publisher.clone()).unwrap_or_else(|| "Unknown".to_string())),
     ]
@@ -275,7 +278,15 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
                         let value_w = inner_w - 118.0 - if is_path { 30.0 } else { 0.0 };
                         let p = bui.painter();
                         p.text(Pos2::new(rr.left(), rr.center().y), Align2::LEFT_CENTER, label, theme::regular(12.5), c::muted());
-                        theme::text(p, Pos2::new(rr.left() + 118.0, rr.center().y), &value, theme::regular(13.0), c::text(), value_w);
+                        let tr = theme::text(p, Pos2::new(rr.left() + 118.0, rr.center().y), &value, theme::regular(13.0), c::text(), value_w);
+                        if label == "Publisher" && value == "Unknown" {
+                            // no company name in the file: worth a second look
+                            let wr = Rect::from_center_size(Pos2::new(tr.right() + 12.0, rr.center().y), Vec2::splat(14.0));
+                            let (cx, top, bot) = (wr.center().x, wr.top() + 1.0, wr.bottom() - 1.0);
+                            p.add(egui::Shape::convex_polygon(vec![Pos2::new(cx, top), Pos2::new(wr.right(), bot), Pos2::new(wr.left(), bot)], c::warn(), Stroke::NONE));
+                            p.text(Pos2::new(cx, wr.center().y + 1.5), Align2::CENTER_CENTER, "!", theme::semibold(10.0), c::panel());
+                            bui.interact(wr, Id::new("app_popup_unknown_pub"), Sense::hover()).on_hover_text("The file doesn't name a publisher");
+                        }
                         if value.chars().count() > 40 {
                             resp.on_hover_text(value.clone());
                         }
@@ -504,11 +515,11 @@ mod tests {
 
     #[test]
     fn info_rows_for_bare_record() {
-        let want = vec![("Path", "—".to_string()), ("Version", "—".to_string()), ("Publisher", "Unknown".to_string())];
+        let want = vec![("Name", "—".to_string()), ("Path", "—".to_string()), ("Version", "—".to_string()), ("Publisher", "Unknown".to_string())];
         assert_eq!(info_rows(None), want);
         assert_eq!(info_rows(Some(&AppRecord::default())), want);
         let rec = AppRecord { path: Some("C:/a.exe".into()), version: Some("1.2".into()), publisher: Some("Acme".into()), ..Default::default() };
-        assert_eq!(info_rows(Some(&rec)), vec![("Path", "C:/a.exe".into()), ("Version", "1.2".into()), ("Publisher", "Acme".into())]);
+        assert_eq!(info_rows(Some(&rec)), vec![("Name", "a.exe".into()), ("Path", "C:/a.exe".into()), ("Version", "1.2".into()), ("Publisher", "Acme".into())]);
     }
 
     #[test]
