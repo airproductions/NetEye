@@ -2,18 +2,17 @@
 <html><head><meta charset="utf-8"><title>NetEye ad</title>
 <style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
 <body><canvas id="c" width="1920" height="1080"></canvas>
+<script src="timeline.js"></script>
 <script>
 // Deterministic 15 s ad: render(t) draws the frame at time t (seconds). render.js steps it frame by frame.
 const W = 1920, H = 1080;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const C = { bg0: '#0f1115', bg1: '#191d25', card: '#1a1e26', card2: '#222731', line: '#2b303b', text: '#e9ecf2', muted: '#8d95a5', dim: '#5c6370',
   teal: '#2dd4bf', violet: '#d08bfa', blue: '#3d7bff', red: '#f87171', amber: '#fbbf24', green: '#4ade80' };
-const F = 'Manrope';
+const F = 'Geist', FM = 'Geist Mono';
 window.ready = (async () => {
-  for (const [w, f] of [[400, 'Regular'], [600, 'SemiBold'], [700, 'Bold']]) {
-    const ff = new FontFace(F, `url(../../assets/fonts/Manrope-${f}.ttf)`, { weight: String(w) });
-    document.fonts.add(await ff.load());
-  }
+  for (const [name, file] of [[F, 'Geist'], [FM, 'GeistMono']])
+    document.fonts.add(await new FontFace(name, `url(fonts/${file}.ttf)`, { weight: '100 900' }).load());
   return true;
 })();
 
@@ -33,11 +32,11 @@ function mix(h1, h2, x) {
   return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
 }
 function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
-function font(size, weight = 700, ls = 0) { ctx.font = `${weight} ${size}px ${F}`; ctx.letterSpacing = `${ls}px`; }
-function text(s, x, y, size, color, weight = 700, align = 'left', ls = 0) {
-  font(size, weight, ls); ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillText(s, x, y);
+function font(size, weight = 700, ls = 0, fam = F) { ctx.font = `${weight} ${size}px "${fam}"`; ctx.letterSpacing = `${ls}px`; }
+function text(s, x, y, size, color, weight = 700, align = 'left', ls = 0, fam = F) {
+  font(size, weight, ls, fam); ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic'; ctx.fillText(s, x, y);
 }
-function tw(s, size, weight = 700, ls = 0) { font(size, weight, ls); return ctx.measureText(s).width; }
+function tw(s, size, weight = 700, ls = 0, fam = F) { font(size, weight, ls, fam); return ctx.measureText(s).width; }
 function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
   t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 // draw fn inside a transformed, faded, optionally blurred layer
@@ -125,26 +124,24 @@ function windowBar(x, y, w, active) {
   ctx.fillStyle = C.line; ctx.fillRect(x, y + 76, w, 1.5);
 }
 
-// ---- headline block (kicker pill, two masked lines, subline)
-function headline(t, t0, x, y, k, l1, l2, sub, accent) {
+// ---- headline block (mono section label, two masked lines, subline)
+function headline(t, t0, x, y, num, name, l1, l2, sub, accent) {
   const e = d => outExpo(prog(t, t0 + d, t0 + d + .7));
-  // kicker
-  layer({ alpha: e(0), dy: (1 - e(0)) * 24 }, () => {
-    const s = k.toUpperCase(), w = tw(s, 19, 700, 3) + 56;
-    rr(x, y, w, 44, 22); ctx.fillStyle = rgba(accent[0], .12); ctx.fill();
-    ctx.strokeStyle = rgba(accent[0], .35); ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.beginPath(); ctx.arc(x + 24, y + 22, 5, 0, 7); ctx.fillStyle = accent[0]; ctx.fill();
-    text(s, x + 40, y + 29, 19, accent[0], 700, 'left', 3);
-  });
+  // section label: "01 ——— TRAFFIC MONITOR", the rule draws in between number and name
+  const label = name.toUpperCase();
+  layer({ alpha: e(0) }, () => text(num, x, y + 30, 24, accent[0], 500, 'left', 1, FM));
+  const lw = 64 * e(.05);
+  ctx.save(); ctx.globalAlpha *= .8; ctx.fillStyle = accent[0]; ctx.fillRect(x + 46, y + 21, lw, 2); ctx.restore();
+  layer({ alpha: e(.12), dx: (1 - e(.12)) * -16 }, () => text(label, x + 128, y + 30, 21, C.muted, 400, 'left', 4, FM));
   const line = (s, ly, d, grad) => {
     const p = e(d);
     ctx.save(); ctx.beginPath(); ctx.rect(x - 20, ly - 110, 1000, 140); ctx.clip();
     const yy = ly + (1 - p) * 125;
     if (grad) {
-      const w = tw(s, 112, 700, -4), g = ctx.createLinearGradient(x, 0, x + w, 0);
+      const w = tw(s, 116, 600, -4.5), g = ctx.createLinearGradient(x, 0, x + w, 0);
       g.addColorStop(0, accent[0]); g.addColorStop(1, accent[1]);
-      text(s, x, yy, 112, g, 700, 'left', -4);
-    } else text(s, x, yy, 112, C.text, 700, 'left', -4);
+      text(s, x, yy, 116, g, 600, 'left', -4.5);
+    } else text(s, x, yy, 116, C.text, 600, 'left', -4.5);
     ctx.restore();
   };
   line(l1, y + 170, .08, false);
@@ -203,7 +200,7 @@ function scene0(t) {
   layer({ alpha: 1 - out, scale: 1 + out * .28, blur: out * 16 }, () => {
     const pop = outBack(prog(t, .05, .6)), open = outBack(prog(t, .35, .75)), pupil = outBack(prog(t, .55, .85));
     const slide = outExpo(prog(t, .85, 1.45));
-    const wordW = tw('NetEye', 132, 700, -4), size = 168, gap = 40;
+    const wordW = tw('NetEye', 132, 600, -4), size = 168, gap = 40;
     const groupW = size + gap + wordW, cx = lerp(W / 2, W / 2 - groupW / 2 + size / 2, slide), cy = 470;
     layer({ alpha: prog(t, .05, .3), scale: lerp(.55, 1, pop), cx, cy }, () => logo(cx, cy, size, Math.max(.06, open), pupil, 1 - prog(t, .9, 1.6) * .6));
     const wx = cx + size / 2 + gap;
@@ -211,7 +208,7 @@ function scene0(t) {
     if (wipe > 0) {
       ctx.save(); ctx.beginPath(); ctx.rect(wx - 10, cy - 120, (wordW + 40) * wipe, 200); ctx.clip();
       ctx.globalAlpha *= prog(t, .95, 1.2);
-      text('NetEye', wx - (1 - wipe) * 60, cy + 46, 132, C.text, 700, 'left', -4);
+      text('NetEye', wx - (1 - wipe) * 60, cy + 46, 132, C.text, 600, 'left', -4);
       ctx.restore();
     }
     // ring pulse when the pupil pops
@@ -233,7 +230,7 @@ function fmt(mb) { return mb >= 1 ? mb.toFixed(1) + ' MB/s' : Math.round(mb * 10
 function scene1(t) {
   const e = env(t, 1.95, 5.5);
   layer(e, () => {
-    headline(t, 2.0, 150, 300, '01  Traffic monitor', 'Monitor your', 'traffic', 'Every app. Every byte. Live.', [C.teal, '#5eead4']);
+    headline(t, 2.0, 150, 300, '01', 'Traffic monitor', 'Monitor your', 'traffic', 'Every app. Every byte. Live.', [C.teal, '#5eead4']);
     const ci = outExpo(prog(t, 2.05, 2.85)), push = 1 + prog(t, 2, 5.5) * .035;
     layer({ alpha: ci, dx: (1 - ci) * 160, scale: push, cx: 1330, cy: 540 }, () => {
       const x = 880, y = 140, w = 900, h = 800;
@@ -268,7 +265,7 @@ function scene1(t) {
         ctx.beginPath(); ctx.arc(gx + gw, hy, 7 + pr * 18, 0, 7); ctx.strokeStyle = rgba(C.teal, .6 * (1 - pr)); ctx.lineWidth = 2; ctx.stroke();
       }
       // tooltip riding the spike
-      const tp = outBack(prog(t, 4.0, 4.35));
+      const tp = outBack(prog(t, CUES.tooltip, CUES.tooltip + .35));
       if (tp > 0) {
         const px = gx + gw * (3.85 - (t - span)) / span, py = base - (base - top) * down(3.85);
         layer({ alpha: clamp(tp), scale: lerp(.6, 1, tp), cx: px, cy: py - 40 }, () => {
@@ -284,7 +281,7 @@ function scene1(t) {
       const ry = gy + gh + 34;
       text('App', gx, ry + 10, 17, C.dim, 600); text('Download', gx + gw, ry + 10, 17, C.dim, 600, 'right');
       apps1.forEach(([n, c1, c2, l, v], i) => {
-        const ri = outExpo(prog(t, 2.35 + i * .08, 3.1 + i * .08)), yy = ry + 30 + i * 66;
+        const [r0, rs] = CUES.trafficRows, ri = outExpo(prog(t, r0 + i * rs, r0 + .75 + i * rs)), yy = ry + 30 + i * 66;
         layer({ alpha: ri, dx: (1 - ri) * 60 }, () => {
           if (i % 2 === 0) { rr(gx - 12, yy, gw + 24, 58, 12); ctx.fillStyle = 'rgba(255,255,255,.025)'; ctx.fill(); }
           appIcon(gx, yy + 10, 38, c1, c2, l);
@@ -307,12 +304,12 @@ const apps2 = [['Firefox', 'Mozilla Corporation', '#ff9500', '#e31587', 'F'], ['
 function scene2(t) {
   const e = env(t, 5.36, 9.0, -1);
   layer(e, () => {
-    headline(t, 5.4, 1090, 300, '02  Firewall', 'Custom', 'firewall', 'Block any app in one click.', [C.violet, '#a78bfa']);
+    headline(t, 5.4, 1090, 300, '02', 'Firewall', 'Custom', 'firewall', 'Block any app in one click.', [C.violet, '#a78bfa']);
     const ci = outExpo(prog(t, 5.4, 6.2)), push = 1 + prog(t, 5.5, 9) * .035;
     const x = 140, y = 150, w = 860, h = 780;
     layer({ alpha: ci, dx: -(1 - ci) * 160, scale: push, cx: 570, cy: 540 }, () => {
       card(x, y, w, h); windowBar(x, y, w, 'Firewall');
-      const clickT = 7.0, blocked = t >= clickT, bp = outExpo(prog(t, clickT, clickT + .35));
+      const clickT = CUES.click, blocked = t >= clickT, bp = outExpo(prog(t, clickT, clickT + .35));
       // header stats
       shield(x + 52, y + 132, 20, C.teal, rgba(C.teal, .12));
       text('Firewall rules', x + 86, y + 142, 26, C.text, 700);
@@ -324,7 +321,7 @@ function scene2(t) {
       const hy = y + 196;
       text('App', x + 32, hy, 17, C.dim, 600); text('Publisher', x + 340, hy, 17, C.dim, 600); text('Outgoing', x + w - 120, hy, 17, C.dim, 600, 'center');
       apps2.forEach(([n, pub, c1, c2, l], i) => {
-        const ri = outExpo(prog(t, 5.7 + i * .07, 6.4 + i * .07)), yy = hy + 22 + i * 92, last = i === 4;
+        const [r0, rs] = CUES.firewallRows, ri = outExpo(prog(t, r0 + i * rs, r0 + .7 + i * rs)), yy = hy + 22 + i * 92, last = i === 4;
         layer({ alpha: ri, dx: -(1 - ri) * 50 }, () => {
           const hover = last ? prog(t, 6.55, 6.8) : 0;
           rr(x + 16, yy, w - 32, 80, 14);
@@ -350,7 +347,7 @@ function scene2(t) {
         });
       });
       // toast
-      const to = outBack(prog(t, 7.15, 7.6)), tOut = prog(t, 8.6, 8.9);
+      const to = outBack(prog(t, CUES.toast, CUES.toast + .45)), tOut = prog(t, 8.6, 8.9);
       if (to > 0) layer({ alpha: clamp(to) * (1 - tOut), dy: (1 - to) * -40, scale: lerp(.9, 1, clamp(to)), cx: x + w / 2, cy: y + h - 60 }, () => {
         const bw = 470, bx = x + w / 2 - bw / 2, by = y + h - 104;
         ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 40;
@@ -375,21 +372,22 @@ const events = [
   [C.violet, 'Upload spike', 'OneDrive  ·  12.4 MB/s', 'up'],
   [C.blue, 'Camera in use', 'Zoom.exe turned on the webcam', 'cam'],
   [C.red, 'Connection blocked', 'updater.exe  →  45.133.1.20', 'block']];
-const evT = k => 9.3 + k * .42;
+const evT = k => CUES.events[0] + k * CUES.events[1];
 function glyph(kind, cx, cy, col) {
   ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.beginPath();
   if (kind === 'link') { ctx.arc(cx, cy, 11, 0, 7); ctx.moveTo(cx - 11, cy); ctx.lineTo(cx + 11, cy); ctx.moveTo(cx, cy - 11); ctx.bezierCurveTo(cx - 8, cy - 4, cx - 8, cy + 4, cx, cy + 11); ctx.moveTo(cx, cy - 11); ctx.bezierCurveTo(cx + 8, cy - 4, cx + 8, cy + 4, cx, cy + 11); ctx.stroke(); }
   else if (kind === 'wifi') { for (const r of [6, 12]) { ctx.moveTo(cx - r * .9, cy + 4 - r * .45); ctx.arc(cx, cy + 6, r, -2.4, -.74); } ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy + 7, 2.6, 0, 7); ctx.fill(); }
+  else if (kind === 'down') { ctx.moveTo(cx, cy - 16); ctx.lineTo(cx, cy + 4); ctx.moveTo(cx - 8, cy - 4); ctx.lineTo(cx, cy + 5); ctx.lineTo(cx + 8, cy - 4); ctx.moveTo(cx - 12, cy + 13); ctx.lineTo(cx + 12, cy + 13); ctx.stroke(); }
   else if (kind === 'up') { ctx.moveTo(cx, cy + 11); ctx.lineTo(cx, cy - 10); ctx.moveTo(cx - 8, cy - 3); ctx.lineTo(cx, cy - 11); ctx.lineTo(cx + 8, cy - 3); ctx.stroke(); }
   else if (kind === 'cam') { ctx.roundRect(cx - 13, cy - 8, 18, 16, 4); ctx.moveTo(cx + 6, cy - 2); ctx.lineTo(cx + 13, cy - 7); ctx.lineTo(cx + 13, cy + 7); ctx.lineTo(cx + 6, cy + 2); ctx.stroke(); }
   else { ctx.arc(cx, cy, 11, 0, 7); ctx.moveTo(cx - 7.5, cy + 7.5); ctx.lineTo(cx + 7.5, cy - 7.5); ctx.stroke(); }
-  ctx.lineCap = 'butt';
+  ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
 }
 function scene3(t) {
   const out = inCubic(prog(t, 11.7, 12.02)), i = outExpo(prog(t, 8.86, 9.6));
   layer({ alpha: Math.min(i, 1 - out), dx: (1 - i) * 140, scale: 1 - out * .06, blur: (1 - i) * 10 + out * 14 }, () => {
-    headline(t, 8.9, 150, 300, '03  Activity log', 'Live', 'activity log', 'Know the moment anything changes.', [C.amber, '#fb923c']);
+    headline(t, 8.9, 150, 300, '03', 'Activity log', 'Live', 'activity log', 'Know the moment anything changes.', [C.amber, '#fb923c']);
     const ci = outExpo(prog(t, 8.95, 9.75)), push = 1 + prog(t, 9, 12) * .035;
     const x = 880, y = 140, w = 900, h = 800;
     layer({ alpha: ci, dx: (1 - ci) * 160, scale: push, cx: 1330, cy: 540 }, () => {
@@ -429,7 +427,7 @@ function scene3(t) {
 function scene4(t) {
   const fade = 1 - prog(t, 14.7, 15.0);
   layer({ alpha: fade }, () => {
-    const pop = outBack(prog(t, 12.0, 12.5)), size = 150, gap = 38, wordW = tw('NetEye', 124, 700, -4);
+    const pop = outBack(prog(t, 12.0, 12.5)), size = 150, gap = 38, wordW = tw('NetEye', 124, 600, -4);
     const gw = size + gap + wordW, lx = W / 2 - gw / 2 + size / 2, cy = 400;
     const blink = t > 13.75 && t < 14.0 ? Math.abs(Math.cos((t - 13.75) / .25 * Math.PI)) : 1;
     const zoom = 1 + prog(t, 12, 15) * .03;
@@ -437,7 +435,7 @@ function scene4(t) {
       layer({ alpha: prog(t, 12, 12.2), scale: lerp(.5, 1, pop), cx: lx, cy }, () => logo(lx, cy, size, Math.max(.08, blink * outBack(prog(t, 12.15, 12.5))), 1, .7));
       const wr = outExpo(prog(t, 12.15, 12.8)), wx = lx + size / 2 + gap;
       ctx.save(); ctx.beginPath(); ctx.rect(wx - 10, cy - 110, wordW + 40, 190); ctx.clip();
-      text('NetEye', wx - (1 - wr) * 80, cy + 44, 124, C.text, 700, 'left', -4); ctx.restore();
+      text('NetEye', wx - (1 - wr) * 80, cy + 44, 124, C.text, 600, 'left', -4); ctx.restore();
       const tg = outExpo(prog(t, 12.4, 13.0));
       layer({ alpha: tg, dy: (1 - tg) * 26 }, () => {
         const a = 'See every connection. ', b = 'Control every app.', wa = tw(a, 46, 600, -1), wb = tw(b, 46, 600, -1), sx = W / 2 - (wa + wb) / 2;
@@ -445,25 +443,30 @@ function scene4(t) {
         const g = ctx.createLinearGradient(sx + wa, 0, sx + wa + wb, 0); g.addColorStop(0, C.teal); g.addColorStop(1, '#60a5fa');
         text(b, sx + wa, 600, 46, g, 600, 'left', -1);
       });
-      const bp = outBack(prog(t, 12.65, 13.1));
-      if (bp > 0) layer({ alpha: clamp(bp), scale: lerp(.7, 1, bp), cx: W / 2, cy: 712 }, () => {
-        const label = 'Free for Windows', bw = tw(label, 30, 700) + 96, bx = W / 2 - bw / 2, by = 676;
-        ctx.save(); ctx.shadowColor = rgba(C.teal, .45); ctx.shadowBlur = 40;
-        const g = ctx.createLinearGradient(bx, by, bx + bw, by + 72); g.addColorStop(0, '#3d7bff'); g.addColorStop(1, '#14c8b4');
-        rr(bx, by, bw, 72, 36); ctx.fillStyle = g; ctx.fill(); ctx.restore();
-        // shine sweep
-        const sp = prog(t, 13.3, 13.9);
-        if (sp > 0 && sp < 1) { ctx.save(); rr(bx, by, bw, 72, 36); ctx.clip(); const sx = lerp(bx - 120, bx + bw + 120, sp);
-          const sg = ctx.createLinearGradient(sx - 60, 0, sx + 60, 0); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(.5, 'rgba(255,255,255,.45)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
-          ctx.fillStyle = sg; ctx.fillRect(bx, by, bw, 72); ctx.restore(); }
-        // download arrow
-        const ax = bx + 46, ay = by + 36; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.beginPath(); ctx.moveTo(ax, ay - 13); ctx.lineTo(ax, ay + 7); ctx.moveTo(ax - 8, ay); ctx.lineTo(ax, ay + 8); ctx.lineTo(ax + 8, ay);
-        ctx.moveTo(ax - 12, ay + 15); ctx.lineTo(ax + 12, ay + 15); ctx.stroke(); ctx.lineCap = 'butt';
-        text(label, bx + 72, by + 47, 30, '#fff', 700);
+      // hairline rule that draws out from the centre, with a light travelling along it
+      const ln = outExpo(prog(t, 12.6, 13.3)), rw = 640 * ln;
+      if (ln > 0) {
+        const rg = ctx.createLinearGradient(W / 2 - 320, 0, W / 2 + 320, 0);
+        rg.addColorStop(0, rgba(C.teal, 0)); rg.addColorStop(.5, rgba(C.teal, .7)); rg.addColorStop(1, rgba(C.blue, 0));
+        ctx.fillStyle = rg; ctx.fillRect(W / 2 - rw / 2, 672, rw, 1.5);
+        const sp = prog(t, CUES.ruleLight, CUES.ruleLight + .7);
+        if (sp > 0 && sp < 1) { const sx = lerp(W / 2 - 300, W / 2 + 300, inOut(sp));
+          ctx.save(); ctx.translate(sx, 672.75); ctx.scale(1, .12);
+          const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, 70);
+          sg.addColorStop(0, `rgba(200,250,255,${Math.sin(sp * Math.PI)})`); sg.addColorStop(1, 'rgba(200,250,255,0)');
+          ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(0, 0, 70, 0, 7); ctx.fill(); ctx.restore(); }
+      }
+      // call to action: download glyph, "Free for Windows" | repo URL in mono
+      const ca = outExpo(prog(t, 12.75, 13.35));
+      layer({ alpha: ca, dy: (1 - ca) * 18 }, () => {
+        const a = 'Free for Windows', b = 'github.com/airproductions/NetEye';
+        const wa = tw(a, 34, 600, -.5), wb = tw(b, 24, 400, 0, FM), icon = 30, gap = 16, div = 56;
+        const sx = W / 2 - (icon + gap + wa + div + wb) / 2, cyy = 748;
+        glyph('down', sx + icon / 2, cyy, C.teal);
+        text(a, sx + icon + gap, cyy + 11, 34, C.text, 600, 'left', -.5);
+        const dx = sx + icon + gap + wa + div / 2; ctx.fillStyle = C.line; ctx.fillRect(dx, cyy - 18, 1.5, 36);
+        text(b, dx + div / 2, cyy + 8, 24, C.muted, 400, 'left', 0, FM);
       });
-      const ul = prog(t, 12.9, 13.3);
-      layer({ alpha: ul, dy: (1 - ul) * 14 }, () => text('github.com/airproductions/NetEye', W / 2, 820, 26, C.muted, 600, 'center'));
     });
   });
 }
