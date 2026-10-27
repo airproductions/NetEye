@@ -8,27 +8,19 @@ use eframe::egui::{
     Mesh, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, TextWrapMode, TextureHandle, Ui, Vec2,
 };
 
+use super::motion;
 use crate::monitor::Shared;
 
 pub mod c {
+    //! Colour accessors for the active palette (see `palette`).
     use eframe::egui::Color32;
-    pub const BG: Color32 = Color32::from_rgb(0x14, 0x16, 0x1b);
-    pub const PANEL: Color32 = Color32::from_rgb(0x1a, 0x1d, 0x23);
-    pub const RAISED: Color32 = Color32::from_rgb(0x21, 0x25, 0x2d);
-    pub const ROW_ALT: Color32 = Color32::from_rgb(0x1d, 0x20, 0x27);
-    pub const HOVER: Color32 = Color32::from_rgb(0x27, 0x2c, 0x36);
-    pub const SELECTED: Color32 = Color32::from_rgb(0x23, 0x33, 0x52);
-    pub const BORDER: Color32 = Color32::from_rgb(0x2a, 0x2f, 0x39);
-    pub const TEXT: Color32 = Color32::from_rgb(0xe7, 0xea, 0xf0);
-    pub const MUTED: Color32 = Color32::from_rgb(0x8d, 0x95, 0xa5);
-    pub const FAINT: Color32 = Color32::from_rgb(0x5c, 0x63, 0x70);
-    pub const ACCENT: Color32 = Color32::from_rgb(0x5b, 0x8d, 0xff);
-    pub const DOWN: Color32 = Color32::from_rgb(0x2d, 0xd4, 0xbf);
-    pub const UP: Color32 = Color32::from_rgb(0xa7, 0x8b, 0xfa);
-    pub const GOOD: Color32 = Color32::from_rgb(0x34, 0xd3, 0x99);
-    pub const BAD: Color32 = Color32::from_rgb(0xf8, 0x71, 0x71);
-    pub const WARN: Color32 = Color32::from_rgb(0xfb, 0xbf, 0x24);
-    pub const ORANGE: Color32 = Color32::from_rgb(0xfb, 0x92, 0x3c);
+    macro_rules! accessors {
+        ($($f:ident),*) => { $(pub fn $f() -> Color32 { super::super::palette::current().$f })* };
+    }
+    accessors!(
+        bg, raised, row_alt, hover, selected, border, text, muted, faint, accent, accent2, down, up, good, bad, warn, orange,
+        bg_glow, bg_mid, bg_deep, glass_top, glass_bottom, glass_border, shadow, mesh_line, mesh_node, glow
+    );
 }
 
 pub fn semibold(size: f32) -> FontId {
@@ -38,61 +30,86 @@ pub fn regular(size: f32) -> FontId {
     FontId::proportional(size)
 }
 
-pub fn setup(ctx: &egui::Context) {
-    let mut fonts = FontDefinitions::default();
-    let load = |f: &str| std::fs::read(format!("C:\\Windows\\Fonts\\{f}")).ok();
-    if let Some(b) = load("segoeui.ttf") {
-        fonts.font_data.insert("segoe".into(), Arc::new(FontData::from_owned(b)));
-        fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "segoe".into());
-    }
-    let semi = load("seguisb.ttf").map(|b| ("segoe-sb", b));
-    let mut semi_family = fonts.families[&FontFamily::Proportional].clone();
-    if let Some((name, b)) = semi {
-        fonts.font_data.insert(name.into(), Arc::new(FontData::from_owned(b)));
-        semi_family.insert(0, name.into());
-    }
-    if let Some(b) = load("seguisym.ttf") {
-        fonts.font_data.insert("symbols".into(), Arc::new(FontData::from_owned(b)));
-        fonts.families.get_mut(&FontFamily::Proportional).unwrap().push("symbols".into());
-        semi_family.push("symbols".into());
-    }
-    fonts.families.insert(FontFamily::Name("semibold".into()), semi_family);
-    ctx.set_fonts(fonts);
+pub fn bold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name("bold".into()))
+}
 
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = Vec2::new(8.0, 6.0);
-    style.spacing.button_padding = Vec2::new(12.0, 6.0);
-    style.spacing.interact_size.y = 30.0;
-    style.text_styles.insert(egui::TextStyle::Body, regular(14.0));
-    style.text_styles.insert(egui::TextStyle::Button, regular(14.0));
-    style.text_styles.insert(egui::TextStyle::Small, regular(12.0));
-    style.text_styles.insert(egui::TextStyle::Heading, semibold(20.0));
-    let v = &mut style.visuals;
-    *v = egui::Visuals::dark();
-    v.panel_fill = c::BG;
-    v.window_fill = c::RAISED;
-    v.window_stroke = Stroke::new(1.0_f32, c::BORDER);
-    v.extreme_bg_color = c::PANEL;
-    v.faint_bg_color = c::ROW_ALT;
-    v.override_text_color = Some(c::TEXT);
-    v.selection.bg_fill = c::SELECTED;
-    v.selection.stroke = Stroke::new(1.0_f32, c::ACCENT);
-    v.hyperlink_color = c::ACCENT;
+/// Manrope (bundled, SIL OFL) with egui's defaults and Segoe UI Symbol behind it for glyph coverage.
+fn font_definitions() -> FontDefinitions {
+    let mut fonts = FontDefinitions::default();
+    let faces: [(&str, &'static [u8]); 3] = [
+        ("manrope", include_bytes!("../../assets/fonts/Manrope-Regular.ttf")),
+        ("manrope-sb", include_bytes!("../../assets/fonts/Manrope-SemiBold.ttf")),
+        ("manrope-b", include_bytes!("../../assets/fonts/Manrope-Bold.ttf")),
+    ];
+    for (name, bytes) in faces {
+        fonts.font_data.insert(name.into(), Arc::new(FontData::from_static(bytes)));
+    }
+    let fallback = fonts.families[&FontFamily::Proportional].clone();
+    let symbols = std::fs::read(r"C:\Windows\Fonts\seguisym.ttf").ok();
+    if let Some(b) = symbols.clone() {
+        fonts.font_data.insert("symbols".into(), Arc::new(FontData::from_owned(b)));
+    }
+    let family = |first: &str| {
+        let mut f = vec![first.to_string()];
+        f.extend(fallback.iter().cloned());
+        if symbols.is_some() {
+            f.push("symbols".into());
+        }
+        f
+    };
+    fonts.families.insert(FontFamily::Proportional, family("manrope"));
+    fonts.families.insert(FontFamily::Name("semibold".into()), family("manrope-sb"));
+    fonts.families.insert(FontFamily::Name("bold".into()), family("manrope-b"));
+    fonts
+}
+
+pub fn setup(ctx: &egui::Context) {
+    ctx.set_fonts(font_definitions());
+
+    // both egui styles (dark and light) get the same metrics, so switching theme keeps the layout
+    ctx.all_styles_mut(|style| {
+        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+        style.spacing.button_padding = Vec2::new(12.0, 6.0);
+        style.spacing.interact_size.y = 30.0;
+        style.text_styles.insert(egui::TextStyle::Body, regular(14.0));
+        style.text_styles.insert(egui::TextStyle::Button, regular(14.0));
+        style.text_styles.insert(egui::TextStyle::Small, regular(12.0));
+        style.text_styles.insert(egui::TextStyle::Heading, semibold(20.0));
+    });
+    apply_visuals(ctx, &super::palette::current());
+}
+
+/// Rebuilds egui's own widget visuals (popups, text edits, scrollbars) from a palette.
+pub fn apply_visuals(ctx: &egui::Context, p: &super::palette::Palette) {
+    let is_dark = p.bg.r() as u32 + p.bg.g() as u32 + p.bg.b() as u32 <= 384;
+    let mut v = if is_dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    // popups sit above glass, so they need an opaque fill
+    let solid = lerp_color(p.bg, p.bg_glow, 0.35);
+    v.panel_fill = p.bg;
+    v.window_fill = solid;
+    v.window_stroke = Stroke::new(1.0_f32, p.border);
+    v.extreme_bg_color = p.panel;
+    v.faint_bg_color = p.row_alt;
+    v.override_text_color = Some(p.text);
+    v.selection.bg_fill = p.selected;
+    v.selection.stroke = Stroke::new(1.0_f32, p.accent);
+    v.hyperlink_color = p.accent;
     for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open, &mut v.widgets.noninteractive] {
         w.corner_radius = CornerRadius::same(8);
     }
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, c::BORDER);
-    v.widgets.inactive.weak_bg_fill = c::RAISED;
-    v.widgets.inactive.bg_fill = c::RAISED;
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.border);
+    v.widgets.inactive.weak_bg_fill = p.raised;
+    v.widgets.inactive.bg_fill = p.raised;
     v.widgets.inactive.bg_stroke = Stroke::NONE;
-    v.widgets.hovered.weak_bg_fill = c::HOVER;
-    v.widgets.hovered.bg_fill = c::HOVER;
+    v.widgets.hovered.weak_bg_fill = p.hover;
+    v.widgets.hovered.bg_fill = p.hover;
     v.widgets.hovered.bg_stroke = Stroke::NONE;
-    v.widgets.active.weak_bg_fill = c::SELECTED;
-    v.widgets.active.bg_fill = c::SELECTED;
-    v.widgets.open.weak_bg_fill = c::HOVER;
-    v.popup_shadow = egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(120) };
-    ctx.set_style(style);
+    v.widgets.active.weak_bg_fill = p.selected;
+    v.widgets.active.bg_fill = p.selected;
+    v.widgets.open.weak_bg_fill = p.hover;
+    v.popup_shadow = egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: p.shadow };
+    ctx.set_visuals(v);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -169,7 +186,12 @@ pub fn label(ui: &mut Ui, s: impl Into<String>, font: FontId, color: Color32) ->
 pub enum Glyph {
     Traffic,
     Shield,
-    Log,
+    Bell,
+    Radar,
+    Wifi,
+    WifiOff,
+    Clock,
+    Grid,
     Scanner,
     Chip,
     Gear,
@@ -188,7 +210,6 @@ pub enum Glyph {
     Graph,
     Bars,
     Globe,
-    Apps,
     Refresh,
     Check,
     Lock,
@@ -212,9 +233,39 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
             line(&[(10.0, 2.0), (17.0, 5.0), (17.0, 10.0), (14.5, 15.0), (10.0, 18.0), (5.5, 15.0), (3.0, 10.0), (3.0, 5.0), (10.0, 2.0)]);
             line(&[(6.8, 10.0), (9.0, 12.4), (13.4, 7.6)]);
         }
-        Glyph::Log => {
+        Glyph::Bell => {
+            line(&[(4.5, 14.0), (5.5, 12.5), (5.5, 9.0)]);
+            p.add(Shape::line(arc(pt(10.0, 9.0), 4.5 * u, 3.1416, 6.2832), s));
+            line(&[(14.5, 9.0), (14.5, 12.5), (15.5, 14.0), (4.5, 14.0)]);
+            p.add(Shape::line(arc(pt(10.0, 14.0), 1.8 * u, 0.0, 3.1416), s));
+        }
+        Glyph::Radar => {
+            p.circle_stroke(pt(10.0, 10.0), 7.5 * u, s);
+            p.circle_stroke(pt(10.0, 10.0), 3.8 * u, s);
+            line(&[(10.0, 10.0), (15.3, 4.7)]);
+            p.circle_filled(pt(10.0, 10.0), 1.1 * u, color);
+        }
+        Glyph::Wifi => {
+            for r in [3.0, 6.0, 9.0] {
+                p.add(Shape::line(arc(pt(10.0, 15.0), r * u, -2.35, -0.79), s));
+            }
+            p.circle_filled(pt(10.0, 15.0), 1.2 * u, color);
+        }
+        Glyph::WifiOff => {
+            for r in [3.0, 6.0, 9.0] {
+                p.add(Shape::line(arc(pt(10.0, 15.0), r * u, -2.35, -0.79), s));
+            }
+            p.circle_filled(pt(10.0, 15.0), 1.2 * u, color);
+            line(&[(3.0, 3.0), (17.0, 17.0)]);
+        }
+        Glyph::Clock => {
             p.circle_stroke(pt(10.0, 10.0), 7.5 * u, s);
             line(&[(10.0, 5.5), (10.0, 10.0), (13.0, 12.0)]);
+        }
+        Glyph::Grid => {
+            for (x, y) in [(3.0, 3.0), (11.0, 3.0), (3.0, 11.0), (11.0, 11.0)] {
+                p.rect_stroke(Rect::from_min_max(pt(x, y), pt(x + 6.0, y + 6.0)), CornerRadius::same(1), s, StrokeKind::Middle);
+            }
         }
         Glyph::Scanner => {
             p.circle_stroke(pt(5.0, 6.0), 2.5 * u, s);
@@ -306,11 +357,6 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
             line(&[(2.5, 10.0), (17.5, 10.0)]);
             p.add(Shape::ellipse_stroke(pt(10.0, 10.0), Vec2::new(3.4 * u, 7.5 * u), s));
         }
-        Glyph::Apps => {
-            for (x, y) in [(3.0, 3.0), (11.0, 3.0), (3.0, 11.0), (11.0, 11.0)] {
-                p.rect_filled(Rect::from_min_max(pt(x, y), pt(x + 6.0, y + 6.0)), CornerRadius::same(1), color);
-            }
-        }
         Glyph::Refresh => {
             p.add(Shape::line(arc(pt(10.0, 10.0), 6.5 * u, -0.6, 4.4), s));
             line(&[(15.5, 2.8), (15.5, 6.5), (11.8, 6.5)]);
@@ -335,24 +381,25 @@ fn arc(center: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
 
 pub fn icon_button(ui: &mut Ui, g: Glyph, size: f32, tooltip: &str) -> Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
-    let col = if resp.hovered() { c::TEXT } else { c::MUTED };
-    if resp.hovered() {
-        ui.painter().rect_filled(r, CornerRadius::same(6), c::HOVER);
+    let t = motion::hover(ui, resp.id, resp.hovered());
+    if t > 0.0 {
+        ui.painter().rect_filled(r, CornerRadius::same(8), lerp_color(Color32::TRANSPARENT, c::hover(), t));
     }
-    glyph(ui.painter(), r.shrink(size * 0.22), g, col);
+    glyph(ui.painter(), r.shrink(size * 0.22), g, lerp_color(c::muted(), c::text(), t));
     resp.on_hover_text(tooltip)
 }
 
 /// Pill button with optional leading glyph.
 pub fn pill(ui: &mut Ui, text_s: &str, g: Option<Glyph>, active: bool) -> Response {
     let font = semibold(13.5);
-    let galley = ui.painter().layout_no_wrap(text_s.to_string(), font.clone(), c::TEXT);
+    let galley = ui.painter().layout_no_wrap(text_s.to_string(), font.clone(), c::text());
     let w = galley.size().x + 28.0 + if g.is_some() { 22.0 } else { 0.0 };
     let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 32.0), Sense::click());
-    let fill = if active { c::SELECTED } else if resp.hovered() { c::HOVER } else { c::RAISED };
+    let t = motion::hover(ui, resp.id, resp.hovered());
+    let fill = if active { c::selected() } else { lerp_color(c::raised(), c::hover(), t) };
     ui.painter().rect_filled(r, CornerRadius::same(16), fill);
     let mut x = r.left() + 14.0;
-    let col = if active { Color32::from_rgb(0x9d, 0xbc, 0xff) } else { c::TEXT };
+    let col = if active { c::accent2() } else { c::text() };
     if let Some(g) = g {
         glyph(ui.painter(), Rect::from_center_size(Pos2::new(x + 8.0, r.center().y), Vec2::splat(16.0)), g, col);
         x += 22.0;
@@ -365,8 +412,9 @@ pub fn primary_button(ui: &mut Ui, text_s: &str) -> Response {
     let font = semibold(13.5);
     let galley = ui.painter().layout_no_wrap(text_s.to_string(), font, Color32::WHITE);
     let (r, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 28.0, 32.0), Sense::click());
-    let fill = if resp.hovered() { Color32::from_rgb(0x6d, 0x9b, 0xff) } else { c::ACCENT };
-    ui.painter().rect_filled(r, CornerRadius::same(8), fill);
+    let t = motion::hover(ui, resp.id, resp.hovered());
+    glow(ui.painter(), r, 10, t);
+    ui.painter().rect_filled(r, CornerRadius::same(10), lerp_color(c::accent(), c::accent2(), t * 0.35));
     ui.painter().galley(r.center() - galley.size() / 2.0, galley, Color32::WHITE);
     resp
 }
@@ -374,33 +422,76 @@ pub fn primary_button(ui: &mut Ui, text_s: &str) -> Response {
 /// iOS-style switch.
 pub fn switch(ui: &mut Ui, on: bool) -> Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::new(40.0, 22.0), Sense::click());
-    let t = ui.ctx().animate_bool(resp.id, on);
-    let bg = lerp_color(Color32::from_rgb(0x3a, 0x40, 0x4c), c::ACCENT, t);
+    let t = ui.ctx().animate_bool_with_time(resp.id, on, motion::FAST);
+    let bg = lerp_color(c::raised(), c::accent(), t);
+    glow(ui.painter(), r, 11, t * 0.6);
     ui.painter().rect_filled(r, CornerRadius::same(11), bg);
+    ui.painter().rect_stroke(r, CornerRadius::same(11), Stroke::new(1.0_f32, lerp_color(c::border(), Color32::TRANSPARENT, t)), StrokeKind::Inside);
     let x = egui::lerp(r.left() + 11.0..=r.right() - 11.0, t);
     ui.painter().circle_filled(Pos2::new(x, r.center().y), 8.0, Color32::WHITE);
     resp
 }
 
-/// Segmented control of glyph buttons.
-pub fn segmented(ui: &mut Ui, items: &[(Glyph, &str)], selected: &mut usize) {
-    let seg = Vec2::new(46.0, 32.0);
-    let (r, _) = ui.allocate_exact_size(Vec2::new(seg.x * items.len() as f32 + 6.0, seg.y + 6.0), Sense::hover());
-    ui.painter().rect_filled(r, CornerRadius::same(19), c::RAISED);
-    for (i, (g, tip)) in items.iter().enumerate() {
-        let sr = Rect::from_min_size(Pos2::new(r.left() + 3.0 + seg.x * i as f32, r.top() + 3.0), seg);
-        let resp = ui.interact(sr, ui.id().with(("seg", i, tip)), Sense::click()).on_hover_text(*tip);
-        if resp.clicked() {
+/// Shared track for segmented controls: draws the trough and a selection pill that slides between items.
+fn segment_track(ui: &mut Ui, widths: &[f32], height: f32, selected: &mut usize, tips: &[&str], mut draw: impl FnMut(&Painter, Rect, usize, bool, f32)) {
+    let total: f32 = widths.iter().sum::<f32>() + 6.0;
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(total, height + 6.0), Sense::hover());
+    let p = ui.painter().clone();
+    p.rect_filled(r, CornerRadius::same(12), c::raised());
+    let mut rects = Vec::with_capacity(widths.len());
+    let mut x = r.left() + 3.0;
+    for w in widths {
+        rects.push(Rect::from_min_size(Pos2::new(x, r.top() + 3.0), Vec2::new(*w, height)));
+        x += w;
+    }
+    let mut hovered = Vec::with_capacity(rects.len());
+    for (i, sr) in rects.iter().enumerate() {
+        let item = ui.interact(*sr, resp.id.with(i), Sense::click());
+        let item = match tips.get(i) {
+            Some(t) if !t.is_empty() => item.on_hover_text(*t),
+            _ => item,
+        };
+        if item.clicked() {
             *selected = i;
         }
-        let active = *selected == i;
-        if active {
-            ui.painter().rect_filled(sr, CornerRadius::same(16), c::ACCENT);
-        } else if resp.hovered() {
-            ui.painter().rect_filled(sr, CornerRadius::same(16), c::HOVER);
-        }
-        glyph(ui.painter(), Rect::from_center_size(sr.center(), Vec2::splat(18.0)), *g, if active { Color32::WHITE } else { c::MUTED });
+        hovered.push(motion::hover(ui, item.id, item.hovered()));
     }
+    // the pill glides from the previous selection to the new one
+    let pos = motion::value(ui.ctx(), resp.id, *selected as f32);
+    let (i0, frac) = (pos.floor() as usize, pos.fract());
+    let a = rects[i0.min(rects.len() - 1)];
+    let b = rects[(i0 + 1).min(rects.len() - 1)];
+    let pill = Rect::from_min_max(a.min.lerp(b.min, frac), a.max.lerp(b.max, frac));
+    glow(&p, pill, 9, 0.7);
+    p.rect_filled(pill, CornerRadius::same(9), c::accent());
+    for (i, sr) in rects.iter().enumerate() {
+        let active = *selected == i;
+        if !active && hovered[i] > 0.0 {
+            p.rect_filled(*sr, CornerRadius::same(9), lerp_color(Color32::TRANSPARENT, c::hover(), hovered[i]));
+        }
+        draw(&p, *sr, i, active, hovered[i]);
+    }
+}
+
+/// Segmented control of glyph buttons.
+pub fn segmented(ui: &mut Ui, items: &[(Glyph, &str)], selected: &mut usize) {
+    let widths = vec![40.0; items.len()];
+    let tips: Vec<&str> = items.iter().map(|(_, t)| *t).collect();
+    segment_track(ui, &widths, 30.0, selected, &tips, |p, r, i, active, h| {
+        let col = if active { Color32::WHITE } else { lerp_color(c::muted(), c::text(), h) };
+        glyph(p, Rect::from_center_size(r.center(), Vec2::splat(17.0)), items[i].0, col);
+    });
+}
+
+/// Segmented control of short text labels, with optional per-item tooltips.
+pub fn segmented_text(ui: &mut Ui, items: &[&str], selected: &mut usize, tooltip: Option<&[&str]>) {
+    let font = semibold(12.5);
+    let widths: Vec<f32> = items.iter().map(|s| ui.painter().layout_no_wrap(s.to_string(), font.clone(), c::text()).size().x + 22.0).collect();
+    let tips = tooltip.unwrap_or(&[]);
+    segment_track(ui, &widths, 28.0, selected, tips, |p, r, i, active, h| {
+        let col = if active { Color32::WHITE } else { lerp_color(c::muted(), c::text(), h) };
+        p.text(r.center(), Align2::CENTER_CENTER, items[i], font.clone(), col);
+    });
 }
 
 /// Rounded dropdown. Returns true when the selection changed.
@@ -418,14 +509,16 @@ pub fn dropdown(ui: &mut Ui, id: &str, options: &[&str], selected: &mut usize) -
 }
 
 pub fn search_box(ui: &mut Ui, value: &mut String, width: f32, hint: &str) -> Response {
-    let (r, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
-    ui.painter().rect_filled(r, CornerRadius::same(17), c::RAISED);
-    glyph(ui.painter(), Rect::from_center_size(Pos2::new(r.left() + 18.0, r.center().y), Vec2::splat(16.0)), Glyph::Search, c::MUTED);
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
+    let t = motion::hover(ui, resp.id, resp.hovered());
+    ui.painter().rect_filled(r, CornerRadius::same(17), lerp_color(c::raised(), c::hover(), t));
+    ui.painter().rect_stroke(r, CornerRadius::same(17), Stroke::new(1.0_f32, c::border()), StrokeKind::Inside);
+    glyph(ui.painter(), Rect::from_center_size(Pos2::new(r.left() + 18.0, r.center().y), Vec2::splat(16.0)), Glyph::Search, c::muted());
     let inner = Rect::from_min_max(Pos2::new(r.left() + 34.0, r.top() + 2.0), Pos2::new(r.right() - 12.0, r.bottom() - 2.0));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
     child.add(
         egui::TextEdit::singleline(value)
-            .hint_text(egui::RichText::new(hint).color(c::FAINT))
+            .hint_text(egui::RichText::new(hint).color(c::faint()))
             .frame(false)
             .desired_width(inner.width())
             .font(regular(14.0)),
@@ -436,12 +529,13 @@ pub fn search_box(ui: &mut Ui, value: &mut String, width: f32, hint: &str) -> Re
 pub fn status_pill(ui: &mut Ui, rect: Rect, blocked: bool, enabled: bool, id: egui::Id) -> Response {
     let resp = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
     let (bg, fg, label) = if blocked {
-        (Color32::from_rgb(0x4a, 0x1f, 0x24), c::BAD, "Blocked")
+        (c::bad().gamma_multiply(36.0 / 255.0), c::bad(), "Blocked")
     } else {
-        (Color32::from_rgb(0x17, 0x3b, 0x2f), c::GOOD, "Allowed")
+        (c::good().gamma_multiply(36.0 / 255.0), c::good(), "Allowed")
     };
-    let bg = if !enabled { Color32::from_rgb(0x25, 0x29, 0x31) } else if resp.hovered() { lerp_color(bg, fg, 0.18) } else { bg };
-    let fg = if enabled { fg } else { c::FAINT };
+    let t = motion::hover(ui, id, resp.hovered());
+    let bg = if !enabled { c::raised() } else { lerp_color(bg, fg, 0.18 * t) };
+    let fg = if enabled { fg } else { c::faint() };
     ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, semibold(12.5), fg);
     resp
@@ -449,16 +543,82 @@ pub fn status_pill(ui: &mut Ui, rect: Rect, blocked: bool, enabled: bool, id: eg
 
 pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-    Color32::from_rgba_unmultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
+    Color32::from_rgba_premultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
 }
 
 pub fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    let slot = ui.painter().add(Shape::Noop);
+    let resp = egui::Frame::default().corner_radius(CornerRadius::same(14)).inner_margin(egui::Margin::same(16)).show(ui, add);
+    ui.painter().set(slot, glass_shape(resp.response.rect, 14));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Glass
+
+/// Outline of a rounded rectangle, clockwise from the top-left arc.
+fn rounded_outline(r: Rect, radius: f32) -> Vec<Pos2> {
+    let rad = radius.min(r.width() / 2.0).min(r.height() / 2.0);
+    let corners = [
+        (Pos2::new(r.left() + rad, r.top() + rad), std::f32::consts::PI),
+        (Pos2::new(r.right() - rad, r.top() + rad), std::f32::consts::PI * 1.5),
+        (Pos2::new(r.right() - rad, r.bottom() - rad), 0.0),
+        (Pos2::new(r.left() + rad, r.bottom() - rad), std::f32::consts::PI * 0.5),
+    ];
+    let mut pts = Vec::with_capacity(4 * 7);
+    for (c0, a0) in corners {
+        for i in 0..=6 {
+            let a = a0 + std::f32::consts::FRAC_PI_2 * i as f32 / 6.0;
+            pts.push(c0 + Vec2::new(a.cos(), a.sin()) * rad);
+        }
+    }
+    pts
+}
+
+/// Shadow, diagonal translucent gradient and hairline border: the "glass" card look.
+pub fn glass_shape(r: Rect, radius: u8) -> Shape {
+    let shadow = egui::Shadow { offset: [0, 10], blur: 28, spread: 0, color: c::shadow() };
+    let outline = rounded_outline(r, radius as f32);
+    let (top, bottom) = (c::glass_top(), c::glass_bottom());
+    let diag = |q: Pos2| (((q.x - r.left()) / r.width().max(1.0)) + ((q.y - r.top()) / r.height().max(1.0))) / 2.0;
+    let mut mesh = Mesh::default();
+    mesh.vertices.push(Vertex { pos: r.center(), uv: egui::epaint::WHITE_UV, color: lerp_color(top, bottom, 0.5) });
+    for q in &outline {
+        mesh.vertices.push(Vertex { pos: *q, uv: egui::epaint::WHITE_UV, color: lerp_color(top, bottom, diag(*q).clamp(0.0, 1.0)) });
+    }
+    let n = outline.len() as u32;
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    let mut border = outline;
+    border.push(border[0]);
+    Shape::Vec(vec![
+        shadow.as_shape(r, CornerRadius::same(radius)).into(),
+        Shape::mesh(mesh),
+        Shape::line(border, Stroke::new(1.0_f32, c::glass_border())),
+    ])
+}
+
+pub fn glass(p: &Painter, r: Rect, radius: u8) {
+    p.add(glass_shape(r, radius));
+}
+
+/// Frame-based glass for layouts that need a `Frame` (flat fill, no gradient).
+pub fn glass_frame() -> egui::Frame {
     egui::Frame::default()
-        .fill(c::PANEL)
-        .stroke(Stroke::new(1.0_f32, c::BORDER))
-        .corner_radius(CornerRadius::same(10))
-        .inner_margin(egui::Margin::same(16))
-        .show(ui, add);
+        .fill(c::glass_top())
+        .stroke(Stroke::new(1.0_f32, c::glass_border()))
+        .corner_radius(CornerRadius::same(14))
+        .inner_margin(egui::Margin::same(14))
+        .shadow(egui::Shadow { offset: [0, 10], blur: 28, spread: 0, color: c::shadow() })
+}
+
+/// Soft outer glow around an active element; `t` scales its strength (0..1).
+pub fn glow(p: &Painter, r: Rect, radius: u8, t: f32) {
+    if t <= 0.0 {
+        return;
+    }
+    let col = c::glow().gamma_multiply(t.min(1.0));
+    p.add(egui::Shadow { offset: [0, 0], blur: 18, spread: 0, color: col }.as_shape(r, CornerRadius::same(radius)));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -479,8 +639,8 @@ pub fn area(p: &Painter, rect: Rect, values: &[f64], max: f64, color: Color32) {
             Pos2::new(x, y)
         })
         .collect();
-    let top = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 80);
-    let bottom = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 6);
+    let top = with_alpha(color, 80);
+    let bottom = with_alpha(color, 6);
     let mut mesh = Mesh::default();
     for (i, pnt) in pts.iter().enumerate() {
         let t = ((rect.bottom() - pnt.y) / rect.height()).clamp(0.0, 1.0);
@@ -496,17 +656,50 @@ pub fn area(p: &Painter, rect: Rect, values: &[f64], max: f64, color: Color32) {
     p.add(Shape::line(pts, Stroke::new(1.6_f32, color)));
 }
 
+/// The parts of `left..right` not covered by any of `holes` (each `(start, end)`), in order.
+pub fn gaps(left: f32, right: f32, holes: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let mut holes = holes.to_vec();
+    holes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = Vec::new();
+    let mut x = left;
+    for (a, b) in holes {
+        if a > x {
+            out.push((x, a.min(right)));
+        }
+        x = x.max(b);
+        if x >= right {
+            break;
+        }
+    }
+    if x < right {
+        out.push((x, right));
+    }
+    out.retain(|(a, b)| b > a);
+    out
+}
+
+/// `col` with its alpha replaced by `a`, keeping the unmultiplied colour (`Color32` channels are premultiplied).
+pub fn with_alpha(col: Color32, a: u8) -> Color32 {
+    let [r, g, b, _] = col.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, a)
+}
+
 /// Draws horizontal gridlines with a max label at the top right and a title at top left.
 pub fn chart_frame(p: &Painter, rect: Rect, title: &str, max_label: &str) {
+    const PAD: f32 = 8.0;
     let y = rect.top();
-    p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0_f32, c::BORDER));
     let font = regular(13.0);
-    let tr = p.text(Pos2::new(rect.left(), y), Align2::LEFT_CENTER, title, font.clone(), c::MUTED);
-    p.rect_filled(tr.expand2(Vec2::new(6.0, 2.0)), CornerRadius::ZERO, c::BG);
-    p.text(Pos2::new(rect.left(), y), Align2::LEFT_CENTER, title, font.clone(), c::MUTED);
-    let mr = p.text(Pos2::new(rect.right(), y), Align2::RIGHT_CENTER, max_label, font.clone(), c::MUTED);
-    p.rect_filled(mr.expand2(Vec2::new(6.0, 2.0)), CornerRadius::ZERO, c::BG);
-    p.text(Pos2::new(rect.right(), y), Align2::RIGHT_CENTER, max_label, font, c::MUTED);
+    let tg = p.layout_no_wrap(title.to_string(), font.clone(), c::muted());
+    let tr = Align2::LEFT_CENTER.anchor_size(Pos2::new(rect.left(), y), tg.size());
+    let mg = p.layout_no_wrap(max_label.to_string(), font, c::muted());
+    let mr = Align2::RIGHT_CENTER.anchor_size(Pos2::new(rect.right(), y), mg.size());
+    // the gridline stops short of each label, since there is no solid background to knock it out with
+    let holes = [(tr.left() - PAD, tr.right() + PAD), (mr.left() - PAD, mr.right() + PAD)];
+    for (a, b) in gaps(rect.left(), rect.right(), &holes) {
+        p.line_segment([Pos2::new(a, y), Pos2::new(b, y)], Stroke::new(1.0_f32, c::border()));
+    }
+    p.galley(tr.min, tg, c::muted());
+    p.galley(mr.min, mg, c::muted());
 }
 
 /// Rounds a maximum up to a "nice" axis value.
@@ -529,8 +722,8 @@ pub fn spark(p: &Painter, rect: Rect, down: &[f64], up: &[f64]) {
     if max <= 0.0 {
         return;
     }
-    area(p, rect, down, max, c::DOWN);
-    area(p, rect, up, max, c::UP);
+    area(p, rect, down, max, c::down());
+    area(p, rect, up, max, c::up());
 }
 
 pub fn empty_state(p: &Painter, center: Pos2, msg: &str) {
@@ -550,7 +743,7 @@ pub fn empty_state(p: &Painter, center: Pos2, msg: &str) {
     p.line_segment([Pos2::new(mx + 12.0, ground), Pos2::new(mx, ground - 30.0)], Stroke::new(2.0_f32, col));
     p.add(Shape::line(arc(Pos2::new(mx, ground - 55.0), 10.0, -2.6, -0.5), Stroke::new(2.0_f32, col)));
     p.add(Shape::line(arc(Pos2::new(mx, ground - 55.0), 18.0, -2.6, -0.5), Stroke::new(2.0_f32, col)));
-    p.text(center + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, msg, semibold(15.0), c::MUTED);
+    p.text(center + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, msg, semibold(15.0), c::muted());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -636,4 +829,83 @@ pub fn logo_rgba(size: u32) -> Vec<u8> {
         }
     }
     px
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lerp_color_keeps_translucent_endpoints() {
+        let a = Color32::from_rgba_unmultiplied(90, 140, 255, 28);
+        let b = Color32::from_rgba_unmultiplied(255, 255, 255, 173);
+        assert_eq!(lerp_color(a, b, 0.0), a);
+        assert_eq!(lerp_color(a, b, 1.0), b);
+    }
+
+    #[test]
+    fn lerp_color_from_transparent_midpoint() {
+        let c = Color32::from_rgba_unmultiplied(120, 170, 255, 26);
+        let m = lerp_color(Color32::TRANSPARENT, c, 0.5);
+        assert!((m.a() as i32 - c.a() as i32 / 2).abs() <= 1, "alpha {}", m.a());
+        assert!((m.r() as i32 - c.r() as i32 / 2).abs() <= 1, "red {}", m.r());
+    }
+
+    #[test]
+    fn with_alpha_on_translucent_keeps_unmultiplied_colour() {
+        // the old `from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)` fed premultiplied channels back in and darkened the colour
+        let c = Color32::from_rgba_unmultiplied(60, 120, 255, 90);
+        let w = with_alpha(c, 45);
+        assert_eq!(w.a(), 45);
+        let (got, want) = (w.to_srgba_unmultiplied(), c.to_srgba_unmultiplied());
+        for i in 0..3 {
+            assert!((got[i] as i32 - want[i] as i32).abs() <= 3, "{got:?} vs {want:?}");
+        }
+    }
+
+    #[test]
+    fn gamma_multiply_scales_translucent_alpha() {
+        // the replacement used for glow(), the rail strip and the mesh halo: egui blends premultiplied
+        // channels, so a weaker copy of a colour keeps each channel's ratio to alpha
+        let c = Color32::from_rgba_unmultiplied(60, 120, 255, 90);
+        let ratios = |x: Color32| [x.r(), x.g(), x.b()].map(|v| v as f32 / x.a() as f32);
+        let off = |x: Color32| ratios(x).iter().zip(ratios(c)).map(|(a, b)| ((a - b) / b).abs()).fold(0.0, f32::max);
+        let h = c.gamma_multiply(0.25);
+        assert_eq!(h.a(), (c.a() as f32 * 0.25 + 0.5) as u8);
+        assert!(off(h) < 0.1, "{h:?} vs {c:?}");
+        let old = Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), c.a() / 4);
+        assert!(off(old) > 0.25, "old pattern shifts the colour: {old:?} vs {c:?}");
+    }
+
+    #[test]
+    fn gaps_without_holes() {
+        assert_eq!(gaps(0.0, 100.0, &[]), vec![(0.0, 100.0)]);
+    }
+
+    #[test]
+    fn gaps_skip_holes() {
+        assert_eq!(gaps(0.0, 100.0, &[(20.0, 30.0)]), vec![(0.0, 20.0), (30.0, 100.0)]);
+        assert_eq!(gaps(0.0, 100.0, &[(80.0, 110.0), (-5.0, 10.0)]), vec![(10.0, 80.0)]);
+    }
+
+    #[test]
+    fn gaps_merge_overlapping_holes() {
+        assert_eq!(gaps(0.0, 100.0, &[(25.0, 40.0), (10.0, 30.0)]), vec![(0.0, 10.0), (40.0, 100.0)]);
+    }
+
+    #[test]
+    fn gaps_fully_covered() {
+        assert!(gaps(0.0, 100.0, &[(-1.0, 60.0), (50.0, 101.0)]).is_empty());
+        assert!(gaps(0.0, 100.0, &[(0.0, 100.0)]).is_empty());
+    }
+
+    #[test]
+    fn fonts_bundled() {
+        let f = font_definitions();
+        for key in ["manrope", "manrope-sb", "manrope-b"] {
+            assert!(f.font_data.contains_key(key), "missing {key}");
+        }
+        assert_eq!(f.families[&FontFamily::Proportional][0], "manrope");
+        assert_eq!(f.families[&FontFamily::Name("bold".into())][0], "manrope-b");
+    }
 }
