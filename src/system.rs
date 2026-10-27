@@ -55,9 +55,9 @@ pub fn set_block_all(on: bool, admin: bool) -> Result<(), String> {
     elevated_batch(&format!("#close_open=0\n#block_all={}\n", on as u8), 1)
 }
 
-/// Runs `vantage.exe --fw-batch` elevated on a batch file holding `body` (one UAC prompt).
+/// Runs `neteye.exe --fw-batch` elevated on a batch file holding `body` (one UAC prompt).
 fn elevated_batch(body: &str, count: usize) -> Result<(), String> {
-    let batch = std::env::temp_dir().join(format!("vantage-fw-{}.txt", std::process::id()));
+    let batch = std::env::temp_dir().join(format!("neteye-fw-{}.txt", std::process::id()));
     std::fs::write(&batch, body).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let q = |s: &str| s.replace('\'', "''");
@@ -74,12 +74,12 @@ fn elevated_batch(body: &str, count: usize) -> Result<(), String> {
         return Err("Administrator permission was declined.".into());
     }
     if !out.status.success() {
-        return Err("The filtering engine rejected the change (see vantage.log).".into());
+        return Err("The filtering engine rejected the change (see neteye.log).".into());
     }
     Ok(())
 }
 
-/// Entry point for `vantage.exe --fw-batch <file>` (runs elevated).
+/// Entry point for `neteye.exe --fw-batch <file>` (runs elevated).
 pub fn run_firewall_batch(file: &str) -> i32 {
     let Ok(text) = std::fs::read_to_string(file.trim_matches('"')) else { return 2 };
     let close_open = !text.contains("#close_open=0");
@@ -365,10 +365,13 @@ pub fn proxy_settings() -> String {
     if parts.is_empty() { "off".into() } else { parts.join(", ") }
 }
 
-/// Adds or removes Vantage from the current user's startup programs.
+/// Adds or removes NetEye from the current user's startup programs.
 pub fn set_run_on_startup(on: bool) -> bool {
     use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
-    let (k, v) = (crate::net::wide(RUN_KEY), crate::net::wide("Vantage"));
+    let (k, v) = (crate::net::wide(RUN_KEY), crate::net::wide("NetEye"));
+    // drop the entry the app registered under its old name
+    let legacy = crate::net::wide("Vantage");
+    unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), legacy.as_ptr()) };
     if !on {
         let rc = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr()) };
         return rc == 0 || rc == 2; // ERROR_FILE_NOT_FOUND: already gone

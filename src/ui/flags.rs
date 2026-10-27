@@ -53,7 +53,7 @@ fn lookup(index: &Index, code: &str) -> Option<usize> {
 /// The atlas texture. It is decoded and uploaded on first use, then cached in `ctx.data`. A PNG
 /// that doesn't decode, or doesn't match the index, caches `None`, so it is only tried once.
 fn atlas(ctx: &egui::Context) -> Option<TextureHandle> {
-    let id = egui::Id::new("vantage.flags.atlas");
+    let id = egui::Id::new("neteye.flags.atlas");
     if let Some(cached) = ctx.data(|d| d.get_temp::<Option<TextureHandle>>(id)) {
         return cached;
     }

@@ -241,7 +241,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                     changed |= toggle_row(ui, "Close open connections when blocking", "Cuts an app off immediately. Some apps (e.g. browsers) then need a restart after you unblock them.", &mut st.close_on_block);
                     changed |= toggle_row(ui, "Keep running in the tray", "Closing the window keeps monitoring in the background.", &mut st.close_to_tray);
                     let mut startup = st.run_on_startup;
-                    if toggle_row(ui, "Run on startup", "Start Vantage when you sign in to Windows.", &mut startup) {
+                    if toggle_row(ui, "Run on startup", "Start NetEye when you sign in to Windows.", &mut startup) {
                         actions.push(Action::RunOnStartup(startup));
                     }
                     changed |= toggle_row(ui, "Look up host names", "Resolve remote IP addresses to names with reverse DNS.", &mut st.dns_lookup);
@@ -300,7 +300,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                     s.toast = Some("Activity log cleared".into());
                 }
                 ui.add_space(20.0);
-                theme::label(ui, format!("Vantage {} · Rust + egui", env!("CARGO_PKG_VERSION")), theme::regular(12.5), c::faint());
+                theme::label(ui, format!("NetEye {} · Rust + egui", env!("CARGO_PKG_VERSION")), theme::regular(12.5), c::faint());
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;

@@ -59,7 +59,7 @@ enum Page {
     Settings,
 }
 
-pub struct VantageApp {
+pub struct NetEyeApp {
     monitor: Monitor,
     page: Page,
     icons: Icons,
@@ -81,7 +81,7 @@ pub struct VantageApp {
     _tray: Option<tray_icon::TrayIcon>,
 }
 
-impl VantageApp {
+impl NetEyeApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         theme::setup(&cc.egui_ctx);
         let hwnd = cc.window_handle().ok().and_then(|h| match h.as_raw() {
@@ -98,6 +98,10 @@ impl VantageApp {
         let quit = Arc::new(AtomicBool::new(false));
         let tray = build_tray(&cc.egui_ctx, hwnd, quit.clone());
         crate::diag::log(&format!("ui ready: tray={} hwnd={}", tray.is_some(), hwnd.is_some()));
+        // keep the startup entry on this exe and name (it was registered as "Vantage" before)
+        if monitor.lock().store.data.settings.run_on_startup {
+            crate::system::set_run_on_startup(true);
+        }
         Self {
             monitor,
             page: start_page(),
@@ -181,7 +185,7 @@ impl VantageApp {
     }
 }
 
-impl VantageApp {
+impl NetEyeApp {
     /// Runs after the lock is released: writes the CSV to Downloads, toasts, then reveals it.
     fn export_usage(&mut self, rows: &[csv_export::ExportRow], name: &str) {
         let Some(dir) = downloads_dir() else {
@@ -219,7 +223,7 @@ fn downloads_dir() -> Option<std::path::PathBuf> {
     }
 }
 
-impl eframe::App for VantageApp {
+impl eframe::App for NetEyeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.log_frames(ctx);
         let quitting = self.quit.load(Ordering::SeqCst);
@@ -337,7 +341,7 @@ impl eframe::App for VantageApp {
     }
 }
 
-impl VantageApp {
+impl NetEyeApp {
     /// Follows the Appearance setting: switches the palette (cross-fading over `motion::NORMAL`),
     /// egui's visuals and the native title bar. The first call applies the theme with no fade.
     fn update_theme(&mut self, ctx: &egui::Context, appearance: crate::store::Appearance) {
@@ -384,7 +388,7 @@ impl VantageApp {
         let logo = Rect::from_min_size(Pos2::new(full.left() + 18.0, full.center().y - 15.0), Vec2::splat(30.0));
         p.rect_filled(logo, CornerRadius::same(8), c::accent());
         theme::glyph(&p, logo.shrink(6.0), Glyph::Traffic, Color32::WHITE);
-        p.text(Pos2::new(logo.right() + 10.0, full.center().y - 8.0), Align2::LEFT_CENTER, "Vantage", theme::semibold(17.0), c::text());
+        p.text(Pos2::new(logo.right() + 10.0, full.center().y - 8.0), Align2::LEFT_CENTER, "NetEye", theme::semibold(17.0), c::text());
         p.text(
             Pos2::new(logo.right() + 10.0, full.center().y + 11.0),
             Align2::LEFT_CENTER,
@@ -556,25 +560,25 @@ fn tab_rects(full: Rect, n: usize) -> Vec<Rect> {
     (0..n).map(|i| Rect::from_min_size(Pos2::new(x0 + i as f32 * (W + GAP), full.center().y - 25.0), Vec2::new(W, 50.0))).collect()
 }
 
-/// Debug builds can force the theme (VANTAGE_APPEARANCE=dark|light) for screenshots.
+/// Debug builds can force the theme (NETEYE_APPEARANCE=dark|light) for screenshots.
 fn appearance_override() -> Option<crate::store::Appearance> {
     use crate::store::Appearance;
     if !cfg!(debug_assertions) {
         return None;
     }
-    match std::env::var("VANTAGE_APPEARANCE").unwrap_or_default().as_str() {
+    match std::env::var("NETEYE_APPEARANCE").unwrap_or_default().as_str() {
         "dark" => Some(Appearance::Dark),
         "light" => Some(Appearance::Light),
         _ => None,
     }
 }
 
-/// Debug builds can open on a given page (VANTAGE_START_PAGE=firewall|log|scanner|hardware|settings) for screenshots.
+/// Debug builds can open on a given page (NETEYE_START_PAGE=firewall|log|scanner|hardware|settings) for screenshots.
 fn start_page() -> Page {
     if !cfg!(debug_assertions) {
         return Page::Traffic;
     }
-    match std::env::var("VANTAGE_START_PAGE").unwrap_or_default().as_str() {
+    match std::env::var("NETEYE_START_PAGE").unwrap_or_default().as_str() {
         "firewall" => Page::Firewall,
         "log" => Page::Log,
         "scanner" => Page::Scanner,
@@ -596,7 +600,7 @@ fn build_tray(ctx: &egui::Context, hwnd: Option<isize>, quit: Arc<AtomicBool>) -
 
     let icon = tray_icon::Icon::from_rgba(theme::logo_rgba(32), 32, 32).ok()?;
     let menu = Menu::new();
-    let open = MenuItem::new("Open Vantage", true, None);
+    let open = MenuItem::new("Open NetEye", true, None);
     let exit = MenuItem::new("Quit", true, None);
     menu.append_items(&[&open, &PredefinedMenuItem::separator(), &exit]).ok()?;
     let (open_id, exit_id) = (open.id().clone(), exit.id().clone());
@@ -629,7 +633,7 @@ fn build_tray(ctx: &egui::Context, hwnd: Option<isize>, quit: Arc<AtomicBool>) -
             show();
         }
     }));
-    TrayIconBuilder::new().with_icon(icon).with_tooltip("Vantage — network monitor").with_menu(Box::new(menu)).build().ok()
+    TrayIconBuilder::new().with_icon(icon).with_tooltip("NetEye — network monitor").with_menu(Box::new(menu)).build().ok()
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 # Country flags
 
-`atlas.png` and `index.txt` are generated files. Vantage embeds them at build time (`src/ui/flags.rs`) and draws each flag at 16×12 logical pixels.
+`atlas.png` and `index.txt` are generated files. NetEye embeds them at build time (`src/ui/flags.rs`) and draws each flag at 16×12 logical pixels.
 
 ## Source
 
@@ -15,7 +15,7 @@ The flags were rasterised and repacked; the artwork itself was not modified.
 ## What is in the atlas
 
 - The 249 codes that flag-icons' `country.json` marks as ISO 3166-1 alpha-2, plus `xk` (Kosovo): 250 flags.
-- Left out: sub-regions (`gb-eng`, `gb-nir`, `gb-sct`, `gb-wls`, `es-ct`, `es-ga`, `es-pv`, `sh-ac`, `sh-hl`, `sh-ta`), organisations (`arab`, `asean`, `cefta`, `eac`, `eu`, `pc`, `un`), the reserved `cp`, `dg` and `ic`, and the placeholder `xx`. Vantage draws a two-letter chip for any code without a flag.
+- Left out: sub-regions (`gb-eng`, `gb-nir`, `gb-sct`, `gb-wls`, `es-ct`, `es-ga`, `es-pv`, `sh-ac`, `sh-hl`, `sh-ta`), organisations (`arab`, `asean`, `cefta`, `eac`, `eu`, `pc`, `un`), the reserved `cp`, `dg` and `ic`, and the placeholder `xx`. NetEye draws a two-letter chip for any code without a flag.
 
 ## Layout
 

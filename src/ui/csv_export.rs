@@ -51,11 +51,11 @@ pub fn to_csv(rows: &[ExportRow]) -> String {
     out
 }
 
-/// `Vantage usage <range> [<selection>] [<network>] [<direction>] <stamp>.csv`, empty parts
+/// `NetEye usage <range> [<selection>] [<network>] [<direction>] <stamp>.csv`, empty parts
 /// left out, with characters Windows forbids in file names removed.
 pub fn file_name(range_code: &str, sel: &str, net: &str, dir: &str, stamp: &str) -> String {
     let clean = |s: &str| -> String { s.chars().filter(|ch| !ch.is_control() && !matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')).collect::<String>().trim().to_string() };
-    let mut name = String::from("Vantage usage");
+    let mut name = String::from("NetEye usage");
     for part in [range_code, sel, net, dir, stamp] {
         let part = clean(part);
         if !part.is_empty() {
@@ -121,11 +121,11 @@ mod tests {
 
     #[test]
     fn file_name_strips_illegal() {
-        assert_eq!(file_name("24h", "", "", "", "2026-10-27 14-30"), "Vantage usage 24h 2026-10-27 14-30.csv");
+        assert_eq!(file_name("24h", "", "", "", "2026-10-27 14-30"), "NetEye usage 24h 2026-10-27 14-30.csv");
         assert_eq!(
             file_name("7d", "C:\\a<b>|c?*\"d/e", "WAN", "download", "2026-10-27 14:30"),
-            "Vantage usage 7d Cabcde WAN download 2026-10-27 1430.csv"
+            "NetEye usage 7d Cabcde WAN download 2026-10-27 1430.csv"
         );
-        assert_eq!(file_name("5m", "x\u{7}y", "", "", "s"), "Vantage usage 5m xy s.csv");
+        assert_eq!(file_name("5m", "x\u{7}y", "", "", "s"), "NetEye usage 5m xy s.csv");
     }
 }

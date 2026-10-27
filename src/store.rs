@@ -1,4 +1,4 @@
-//! Persistent state, saved as JSON under %APPDATA%\Vantage.
+//! Persistent state, saved as JSON under %APPDATA%\NetEye.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -615,7 +615,22 @@ pub struct Store {
 
 impl Store {
     pub fn load() -> Self {
-        let dir = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("Vantage");
+        let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        let dir = base.join("NetEye");
+        // the app was called Vantage before: carry its history over once
+        let old = base.join("Vantage");
+        if !dir.exists() && old.join("data.json").exists() {
+            if std::fs::rename(&old, &dir).is_ok() {
+                for (from, to) in [("vantage.log", "neteye.log"), ("vantage.old.log", "neteye.old.log")] {
+                    let _ = std::fs::rename(dir.join(from), dir.join(to));
+                }
+            } else if std::fs::create_dir_all(&dir).is_ok() {
+                // the old app still has the folder open: copy the history instead
+                for f in ["data.json", "manuf.txt"] {
+                    let _ = std::fs::copy(old.join(f), dir.join(f));
+                }
+            }
+        }
         let _ = std::fs::create_dir_all(&dir);
         crate::diag::init(&dir);
         let (data, fresh) = match std::fs::read(dir.join("data.json")).ok().and_then(|b| serde_json::from_slice::<Data>(&b).ok()) {
@@ -872,7 +887,7 @@ mod flow_tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let d = std::env::temp_dir().join(format!("vantage-test-{name}-{}-{nanos}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("neteye-test-{name}-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

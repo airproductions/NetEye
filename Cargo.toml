@@ -1,5 +1,5 @@
 [package]
-name = "vantage"
+name = "neteye"
 version = "1.0.0"
 edition = "2021"
 description = "Network monitor and firewall for Windows"

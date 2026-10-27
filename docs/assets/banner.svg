@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-label="NetEye: see every connection on your PC">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14161b"/>
+      <stop offset="1" stop-color="#1c2029"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3d7bff"/>
+      <stop offset="1" stop-color="#14c8b4"/>
+    </linearGradient>
+    <linearGradient id="down" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2dd4bf" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="up" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.40"/>
+      <stop offset="1" stop-color="#a78bfa" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fade" gradientUnits="userSpaceOnUse" x1="700" y1="0" x2="900" y2="0">
+      <stop offset="0" stop-color="#171a20" stop-opacity="1"/>
+      <stop offset="1" stop-color="#171a20" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#2a2f39" stroke-width="1"/>
+    </pattern>
+    <clipPath id="frame"><rect width="1280" height="400" rx="24"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="400" fill="url(#bg)"/>
+    <rect width="1280" height="400" fill="url(#grid)" opacity="0.55"/>
+
+    <!-- traffic graph -->
+    <path d="M700 400 L700 300 C760 290 790 230 850 240 S940 300 990 255 S1060 130 1110 150 S1190 250 1220 200 S1270 150 1280 155 L1280 400 Z" fill="url(#down)"/>
+    <path d="M700 300 C760 290 790 230 850 240 S940 300 990 255 S1060 130 1110 150 S1190 250 1220 200 S1270 150 1280 155" fill="none" stroke="#2dd4bf" stroke-width="3"/>
+    <path d="M700 400 L700 352 C760 348 800 322 860 330 S950 350 1010 318 S1080 270 1130 290 S1210 330 1240 305 S1272 290 1280 292 L1280 400 Z" fill="url(#up)"/>
+    <path d="M700 352 C760 348 800 322 860 330 S950 350 1010 318 S1080 270 1130 290 S1210 330 1240 305 S1272 290 1280 292" fill="none" stroke="#a78bfa" stroke-width="3"/>
+    <circle cx="1110" cy="150" r="6" fill="#2dd4bf"/>
+    <circle cx="1110" cy="150" r="14" fill="none" stroke="#2dd4bf" stroke-opacity="0.35" stroke-width="2"/>
+    <rect x="690" width="220" height="400" fill="url(#fade)"/>
+
+    <!-- logo -->
+    <g transform="translate(96 120)">
+      <rect width="160" height="160" rx="35" fill="url(#tile)"/>
+      <path d="M32 80 A54.4 54.4 0 0 1 128 80 A54.4 54.4 0 0 1 32 80 Z" fill="none" stroke="#ffffff" stroke-width="16" stroke-linejoin="round"/>
+      <circle cx="80" cy="80" r="16" fill="#ffffff"/>
+    </g>
+
+    <!-- wordmark -->
+    <text x="296" y="196" font-family="Manrope, 'Segoe UI', Inter, Arial, sans-serif" font-size="76" font-weight="700" fill="#e7eaf0" letter-spacing="-1">NetEye</text>
+    <text x="300" y="242" font-family="Manrope, 'Segoe UI', Inter, Arial, sans-serif" font-size="26" font-weight="600" fill="#8d95a5">See every connection on your PC.</text>
+    <text x="300" y="282" font-family="Manrope, 'Segoe UI', Inter, Arial, sans-serif" font-size="18" fill="#5c6370">Network monitor · per-app firewall · LAN scanner</text>
+    <text x="300" y="310" font-family="Manrope, 'Segoe UI', Inter, Arial, sans-serif" font-size="18" fill="#5c6370">Native Windows app, written in Rust</text>
+
+    <!-- legend -->
+    <g font-family="Manrope, 'Segoe UI', Inter, Arial, sans-serif" font-size="15" fill="#8d95a5">
+      <circle cx="1096" cy="44" r="5" fill="#2dd4bf"/><text x="1108" y="49">Download</text>
+      <circle cx="1196" cy="44" r="5" fill="#a78bfa"/><text x="1208" y="49">Upload</text>
+    </g>
+  </g>
+</svg>

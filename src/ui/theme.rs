@@ -1023,16 +1023,13 @@ pub fn logo_rgba(size: u32) -> Vec<u8> {
             let (r0, g0, b0) = (0x3d as f32, 0x7b as f32, 0xff as f32);
             let (r1, g1, b1) = (0x14 as f32, 0xc8 as f32, 0xb4 as f32);
             let mut col = [r0 + (r1 - r0) * t, g0 + (g1 - g0) * t, b0 + (b1 - b0) * t];
-            // white "V" made of two strokes with a pulse dot
-            let seg = |ax: f32, ay: f32, bx: f32, by: f32| {
-                let (px_, py_) = (fx / s, fy / s);
-                let (vx, vy) = (bx - ax, by - ay);
-                let h = (((px_ - ax) * vx + (py_ - ay) * vy) / (vx * vx + vy * vy)).clamp(0.0, 1.0);
-                ((px_ - ax - vx * h).powi(2) + (py_ - ay - vy * h).powi(2)).sqrt() * s
-            };
-            let dv = seg(0.27, 0.30, 0.50, 0.74).min(seg(0.50, 0.74, 0.73, 0.30));
-            let w = s * 0.055;
-            let white = (w - dv + 0.5).clamp(0.0, 1.0);
+            // white eye: an almond outline (where two circles overlap) around a solid pupil
+            let (px_, py_) = (fx / s - 0.5, fy / s - 0.5);
+            let (rr, k) = (0.34, 0.16); // almond 0.60 wide, 0.36 tall
+            let lens = (px_.powi(2) + (py_ - k).powi(2)).sqrt().max((px_.powi(2) + (py_ + k).powi(2)).sqrt()) - rr;
+            let outline = lens.abs() * s - s * 0.05;
+            let pupil = (px_.powi(2) + py_.powi(2)).sqrt() * s - s * 0.10;
+            let white = (0.5 - outline.min(pupil)).clamp(0.0, 1.0);
             for ch in &mut col {
                 *ch = *ch + (255.0 - *ch) * white;
             }

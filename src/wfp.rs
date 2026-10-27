@@ -59,8 +59,8 @@ impl Engine {
     }
 
     fn ensure_sublayer(&self) -> Result<(), String> {
-        let name = wide("Vantage");
-        let desc = wide("Per-app block rules created by Vantage");
+        let name = wide("NetEye");
+        let desc = wide("Per-app block rules created by NetEye");
         let mut sl: FWPM_SUBLAYER0 = unsafe { std::mem::zeroed() };
         sl.subLayerKey = SUBLAYER;
         sl.displayData.name = name.as_ptr() as *mut u16;
@@ -69,7 +69,7 @@ impl Engine {
         sl.weight = 0xffff;
         let rc = unsafe { FwpmSubLayerAdd0(self.0, &sl, null_mut()) };
         if rc != 0 && rc != FWP_E_ALREADY_EXISTS {
-            return Err(format!("could not register the Vantage sublayer (0x{rc:08x})"));
+            return Err(format!("could not register the NetEye sublayer (0x{rc:08x})"));
         }
         Ok(())
     }
@@ -86,7 +86,7 @@ impl Engine {
         for (idx, layer) in layers(dir) {
             let key = filter_key(program, idx);
             unsafe { FwpmFilterDeleteByKey0(self.0, &key) };
-            let name = wide(&format!("Vantage block {} {file}", if dir == Dir::In { "in" } else { "out" }));
+            let name = wide(&format!("NetEye block {} {file}", if dir == Dir::In { "in" } else { "out" }));
             let desc = wide(program);
             let mut cond: FWPM_FILTER_CONDITION0 = unsafe { std::mem::zeroed() };
             cond.fieldKey = FWPM_CONDITION_ALE_APP_ID;
@@ -174,7 +174,7 @@ pub fn block_all(on: bool) -> Result<(), String> {
         if !on {
             continue;
         }
-        let name = wide("Vantage block all outgoing");
+        let name = wide("NetEye block all outgoing");
         let mut cond: FWPM_FILTER_CONDITION0 = unsafe { std::mem::zeroed() };
         cond.fieldKey = FWPM_CONDITION_FLAGS;
         cond.matchType = FWP_MATCH_FLAGS_NONE_SET;

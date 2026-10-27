@@ -1,4 +1,4 @@
-//! App details popup: opened from an app's name or icon, shows what Vantage knows about the app.
+//! App details popup: opened from an app's name or icon, shows what NetEye knows about the app.
 
 use std::io::{self, Read};
 use std::os::windows::process::CommandExt;
@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn sha256_known_value() {
-        let p = std::env::temp_dir().join(format!("vantage_sha_{}.bin", std::process::id()));
+        let p = std::env::temp_dir().join(format!("neteye_sha_{}.bin", std::process::id()));
         std::fs::write(&p, b"abc").unwrap();
         let h = sha256_file(&p).unwrap();
         let _ = std::fs::remove_file(&p);

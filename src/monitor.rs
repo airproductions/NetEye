@@ -1009,7 +1009,7 @@ impl Monitor {
                 self.set_block(&key, Dir::Out, true);
                 let name = self.lock().app_name(&key);
                 if notify_on {
-                    notify(&format!("{name} wants to connect to the internet. It is blocked until you allow it in Vantage."));
+                    notify(&format!("{name} wants to connect to the internet. It is blocked until you allow it in NetEye."));
                 }
             }
             repaint();
@@ -1080,7 +1080,7 @@ fn notify(body: &str) {
     }
     let body = body.to_string();
     std::thread::spawn(move || {
-        let _ = notify_rust::Notification::new().summary("Vantage").body(&body).show();
+        let _ = notify_rust::Notification::new().summary("NetEye").body(&body).show();
     });
 }
 

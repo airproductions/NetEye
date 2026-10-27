@@ -27,22 +27,22 @@ fn main() -> eframe::Result {
     let icon = egui::IconData { rgba: ui::theme::logo_rgba(64), width: 64, height: 64 };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Vantage")
+            .with_title("NetEye")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([1100.0, 680.0])
             .with_icon(icon),
         ..Default::default()
     };
-    eframe::run_native("Vantage", options, Box::new(|cc| Ok(Box::new(ui::VantageApp::new(cc)))))
+    eframe::run_native("NetEye", options, Box::new(|cc| Ok(Box::new(ui::NetEyeApp::new(cc)))))
 }
 
-/// Returns false (after focusing the running window) when Vantage is already running.
+/// Returns false (after focusing the running window) when NetEye is already running.
 /// With `wait`, first gives the previous copy up to 10 s to exit (elevated restart).
 fn single_instance(wait: bool) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW};
-    let name = net::wide(r"Local\VantageNetworkMonitor");
+    let name = net::wide(r"Local\NetEyeNetworkMonitor");
     unsafe {
         // Leaked on purpose: the mutex must live as long as the process.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -58,7 +58,7 @@ fn single_instance(wait: bool) -> bool {
             CloseHandle(mutex);
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        let title = net::wide("Vantage");
+        let title = net::wide("NetEye");
         let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
         if !hwnd.is_null() {
             ShowWindow(hwnd, SW_SHOW);
