@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{self, Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
+use super::sort::{self, SortSpec};
 use super::theme::{self, c, Glyph, Icons};
 use super::Action;
 use crate::monitor::{ConnView, Shared, OTHER_KEY, SYSTEM_KEY};
@@ -25,6 +26,43 @@ pub struct FirewallPage {
     hide_active: bool,
     /// Name being typed for a new profile, while the save field is open.
     new_profile: Option<String>,
+}
+
+const DEFAULT_SORT: SortSpec = SortSpec { col: 0, desc: false };
+
+/// The sortable fields of one app row.
+struct FwRow {
+    key: String,
+    name: String,
+    publisher: Option<String>,
+    version: Option<String>,
+    block_in: bool,
+    block_out: bool,
+    hosts: usize,
+    down: u64,
+    up: u64,
+    traffic: u64,
+}
+
+/// Sorts one group (active or inactive) on its own; rows without a publisher or version go last.
+fn sort_group(rows: &mut [FwRow], spec: SortSpec) {
+    sort::apply(
+        rows,
+        spec,
+        |a, b, col| match col {
+            0 => sort::cmp_text(&a.name, &b.name),
+            1 => (!a.block_in).cmp(&!b.block_in),
+            2 => (!a.block_out).cmp(&!b.block_out),
+            3 => sort::cmp_opt(a.publisher.as_deref().map(str::to_lowercase), b.publisher.as_deref().map(str::to_lowercase), spec.desc),
+            4 => sort::cmp_opt(a.version.as_deref().map(str::to_lowercase), b.version.as_deref().map(str::to_lowercase), spec.desc),
+            5 => a.hosts.cmp(&b.hosts),
+            6 => a.down.cmp(&b.down),
+            7 => a.up.cmp(&b.up),
+            8 => a.traffic.cmp(&b.traffic),
+            _ => std::cmp::Ordering::Equal,
+        },
+        |r| r.name.as_str(),
+    );
 }
 
 struct Cols {
@@ -62,56 +100,71 @@ impl FirewallPage {
         let full = ui.max_rect();
         self.toolbar(ui, s, actions, full);
 
-        // the table lives in one glass card inside the 16px gutter
-        let card = Rect::from_min_max(Pos2::new(full.left() + 16.0, ui.cursor().top() + 4.0), Pos2::new(full.right() - 16.0, full.bottom() - 14.0));
-        theme::glass(ui.painter(), card, 14);
-        let inner = card.shrink2(Vec2::new(1.0, 6.0));
-        let ui = &mut ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
-        ui.set_clip_rect(inner.intersect(ui.clip_rect()));
-        let full = inner;
-
         let cols = Cols::new(full.left(), full.width());
-        let (hr, _) = ui.allocate_exact_size(Vec2::new(full.width(), 30.0), Sense::hover());
-        let p = ui.painter();
-        let hy = hr.center().y;
-        let head = |x: f32, t: &str| {
-            p.text(Pos2::new(x, hy), Align2::LEFT_CENTER, t, theme::semibold(12.0), c::muted());
-        };
-        head(cols.app + 30.0, "Apps");
-        head(cols.inc + 8.0, "Incoming");
-        head(cols.out + 8.0, "Outgoing");
-        head(cols.publisher, "Publisher");
-        head(cols.version, "Version");
-        head(cols.hosts, "Hosts");
-        theme::glyph(p, Rect::from_center_size(Pos2::new(cols.down - 30.0, hy), Vec2::splat(13.0)), Glyph::Down, c::down());
-        theme::glyph(p, Rect::from_center_size(Pos2::new(cols.up - 30.0, hy), Vec2::splat(13.0)), Glyph::Up, c::up());
-        head(cols.spark, "Traffic");
-        p.line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::border()));
+        let mut spec = s.store.data.settings.sort_for("firewall", DEFAULT_SORT);
+        if spec.col > 8 {
+            spec = DEFAULT_SORT;
+        }
+        let (hr, _) = ui.allocate_exact_size(Vec2::new(full.width(), 34.0), Sense::hover());
+        ui.painter().rect_filled(hr, CornerRadius::ZERO, c::panel());
+        let (top, bot) = (hr.top(), hr.bottom());
+        let span = |x0: f32, x1: f32| Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, bot));
+        let mut changed = false;
+        changed |= sort::header(ui, span(cols.app + 30.0, cols.inc - 8.0), "Apps", 0, &mut spec, false, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.inc + 8.0, cols.out - 4.0), "Incoming", 1, &mut spec, false, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.out + 8.0, cols.publisher - 4.0), "Outgoing", 2, &mut spec, false, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.publisher, cols.version - 4.0), "Publisher", 3, &mut spec, false, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.version, cols.hosts - 4.0), "Version", 4, &mut spec, false, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.hosts, cols.down - 76.0), "Hosts", 5, &mut spec, true, Align2::LEFT_CENTER);
+        theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(cols.down - 30.0, hr.center().y), Vec2::splat(13.0)), Glyph::Down, c::down());
+        theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(cols.up - 30.0, hr.center().y), Vec2::splat(13.0)), Glyph::Up, c::up());
+        changed |= sort::header(ui, span(cols.down - 44.0, cols.down), "", 6, &mut spec, true, Align2::RIGHT_CENTER);
+        changed |= sort::header(ui, span(cols.up - 44.0, cols.up), "", 7, &mut spec, true, Align2::RIGHT_CENTER);
+        changed |= sort::header(ui, span(cols.spark, cols.end), "Traffic", 8, &mut spec, true, Align2::LEFT_CENTER);
+        ui.painter().line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::border()));
+        if changed {
+            s.store.data.settings.set_sort("firewall", spec);
+            s.store.mark_dirty();
+        }
 
         let q = self.search.to_lowercase();
-        let mut active: Vec<(String, String)> = Vec::new();
-        let mut inactive: Vec<(String, String)> = Vec::new();
+        let mut active: Vec<FwRow> = Vec::new();
+        let mut inactive: Vec<FwRow> = Vec::new();
         for (k, a) in &s.store.data.apps {
             let name = s.app_name(k);
             let hay = format!("{} {} {}", name, a.publisher.clone().unwrap_or_default(), a.hosts.join(" ")).to_lowercase();
             if !q.is_empty() && !hay.contains(&q) {
                 continue;
             }
-            let live = s.apps_live.get(k).map(|l| l.in_conns + l.out_conns > 0 || l.rate != [0, 0]).unwrap_or(false);
-            if live { active.push((k.clone(), name)) } else { inactive.push((k.clone(), name)) }
+            let lv = s.apps_live.get(k);
+            let live = lv.map(|l| l.in_conns + l.out_conns > 0 || l.rate != [0, 0]).unwrap_or(false);
+            let mut hosts: Vec<String> = lv
+                .map(|l| l.conns.iter().filter_map(|c| c.host.clone().or_else(|| (!crate::net::is_local(&c.remote) && c.proto == Proto::Tcp).then(|| c.remote.to_string()))).collect())
+                .unwrap_or_default();
+            hosts.dedup();
+            let hosts = hosts.len() + a.hosts.iter().filter(|h| !hosts.contains(h)).count();
+            let rate = lv.map(|l| l.rate).unwrap_or([0, 0]);
+            let fw = FwRow {
+                key: k.clone(),
+                name,
+                publisher: a.publisher.clone(),
+                version: a.version.clone(),
+                block_in: a.block_in,
+                block_out: a.block_out,
+                hosts,
+                down: rate[0],
+                up: rate[1],
+                traffic: rate[0] + rate[1],
+            };
+            if live { active.push(fw) } else { inactive.push(fw) }
         }
-        let rate_of = |k: &str| s.apps_live.get(k).map(|l| l.rate[0] + l.rate[1]).unwrap_or(0);
-        active.sort_by(|a, b| rate_of(&b.0).cmp(&rate_of(&a.0)).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase())));
-        inactive.sort_by(|a, b| {
-            let la = s.store.data.apps[&a.0].last_seen;
-            let lb = s.store.data.apps[&b.0].last_seen;
-            lb.cmp(&la)
-        });
+        sort_group(&mut active, spec);
+        sort_group(&mut inactive, spec);
 
         // per-app sparkline series from the last minute of live samples
         let mut spark: HashMap<&str, (Vec<f64>, Vec<f64>)> = HashMap::new();
         let window: Vec<_> = s.live.iter().rev().take(60).collect();
-        for (k, _) in active.iter() {
+        for FwRow { key: k, .. } in active.iter() {
             let mut d = vec![0.0; window.len()];
             let mut u = vec![0.0; window.len()];
             for (i, l) in window.iter().rev().enumerate() {
@@ -129,7 +182,7 @@ impl FirewallPage {
                 self.hide_active = !self.hide_active;
             }
             if !self.hide_active {
-                for (i, (k, name)) in active.iter().enumerate() {
+                for (i, FwRow { key: k, name, .. }) in active.iter().enumerate() {
                     self.row(ui, s, icons, actions, &cols, k, name, i, spark.get(k.as_str()), enabled);
                 }
             }
@@ -137,7 +190,7 @@ impl FirewallPage {
                 self.hide_inactive = !self.hide_inactive;
             }
             if !self.hide_inactive {
-                for (i, (k, name)) in inactive.iter().enumerate() {
+                for (i, FwRow { key: k, name, .. }) in inactive.iter().enumerate() {
                     self.row(ui, s, icons, actions, &cols, k, name, i, None, enabled);
                 }
             }
@@ -150,8 +203,7 @@ impl FirewallPage {
 
     fn toolbar(&mut self, ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>, full: Rect) {
         let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 96.0), Sense::hover());
-        theme::glass(ui.painter(), Rect::from_min_max(Pos2::new(bar.left() + 16.0, bar.top() + 4.0), Pos2::new(bar.right() - 16.0, bar.bottom() - 4.0)), 14);
-        let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(44.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(28.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let enabled = s.store.data.settings.firewall_enabled;
         b.vertical(|ui| {
             title(ui, Glyph::Shield, "Firewall rules", "Master switch for blocking apps. Blocks apply while this is on.");
@@ -422,4 +474,36 @@ fn title(ui: &mut egui::Ui, g: Glyph, text: &str, tip: &str) {
 fn sep(ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(1.0, 48.0), Sense::hover());
     ui.painter().rect_filled(r, CornerRadius::ZERO, c::border());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(name: &str, publisher: Option<&str>) -> FwRow {
+        FwRow { key: name.to_string(), name: name.to_string(), publisher: publisher.map(String::from), version: None, block_in: false, block_out: false, hosts: 0, down: 0, up: 0, traffic: 0 }
+    }
+
+    #[test]
+    fn firewall_sort_keeps_groups() {
+        let mut active = vec![row("x", Some("Acme")), row("y", None)];
+        let mut inactive = vec![row("z", Some("Zed"))];
+        let spec = SortSpec { col: 3, desc: true };
+        sort_group(&mut active, spec);
+        sort_group(&mut inactive, spec);
+        let names = |v: &[FwRow]| v.iter().map(|r| r.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&active), ["x", "y"], "publisher desc, missing publisher last");
+        assert_eq!(names(&inactive), ["z"]);
+        let spec = SortSpec { col: 3, desc: false };
+        sort_group(&mut active, spec);
+        assert_eq!(names(&active), ["x", "y"], "missing publisher last ascending too");
+    }
+
+    #[test]
+    fn blocked_sorts_before_allowed() {
+        let mut v = vec![row("a", None), row("b", None)];
+        v[1].block_out = true;
+        sort_group(&mut v, SortSpec { col: 2, desc: false });
+        assert_eq!(v[0].name, "b");
+    }
 }
