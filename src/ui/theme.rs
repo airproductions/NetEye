@@ -542,7 +542,7 @@ pub fn status_pill(ui: &mut Ui, rect: Rect, blocked: bool, enabled: bool, id: eg
 
 pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-    Color32::from_rgba_unmultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
+    Color32::from_rgba_premultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
 }
 
 pub fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
@@ -801,6 +801,22 @@ pub fn logo_rgba(size: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lerp_color_keeps_translucent_endpoints() {
+        let a = Color32::from_rgba_unmultiplied(90, 140, 255, 28);
+        let b = Color32::from_rgba_unmultiplied(255, 255, 255, 173);
+        assert_eq!(lerp_color(a, b, 0.0), a);
+        assert_eq!(lerp_color(a, b, 1.0), b);
+    }
+
+    #[test]
+    fn lerp_color_from_transparent_midpoint() {
+        let c = Color32::from_rgba_unmultiplied(120, 170, 255, 26);
+        let m = lerp_color(Color32::TRANSPARENT, c, 0.5);
+        assert!((m.a() as i32 - c.a() as i32 / 2).abs() <= 1, "alpha {}", m.a());
+        assert!((m.r() as i32 - c.r() as i32 / 2).abs() <= 1, "red {}", m.r());
+    }
 
     #[test]
     fn fonts_bundled() {

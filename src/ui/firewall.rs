@@ -148,19 +148,20 @@ impl FirewallPage {
         let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(44.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let enabled = s.store.data.settings.firewall_enabled;
         b.vertical(|ui| {
-            theme::label(ui, "Firewall rules", theme::semibold(15.0), c::text());
+            title(ui, Glyph::Shield, "Firewall rules", "Master switch for blocking apps. Blocks apply while this is on.");
             ui.horizontal(|ui| {
                 if theme::switch(ui, enabled).clicked() && !s.firewall_busy {
                     actions.push(Action::FirewallEnabled(!enabled));
                 }
-                theme::label(ui, if enabled { "On" } else { "Off" }, theme::semibold(13.0), if enabled { c::good() } else { c::muted() });
+                theme::label(ui, if enabled { "On" } else { "Off" }, theme::semibold(13.0), if enabled { c::good() } else { c::muted() })
+                    .on_hover_text(if enabled { "Firewall rules are on" } else { "Firewall rules are off" });
             });
         });
         b.add_space(28.0);
         sep(&mut b);
         b.add_space(28.0);
         b.vertical(|ui| {
-            theme::label(ui, "Click to block", theme::semibold(15.0), c::text());
+            title(ui, Glyph::Lock, "Click to block", "Click an Allowed or Blocked pill in the table to toggle that direction for an app.");
             let engine = match &s.firewall_product {
                 Some(p) if !p.to_lowercase().contains("windows") => format!("Enforced at the filtering layer · works alongside {p}"),
                 _ => "Enforced at the Windows filtering layer".to_string(),
@@ -173,11 +174,11 @@ impl FirewallPage {
         b.add_space(28.0);
         let blocked = s.store.data.apps.values().filter(|a| a.block_in || a.block_out).count();
         b.vertical(|ui| {
-            theme::label(ui, "Blocked apps", theme::semibold(15.0), c::text());
+            title(ui, Glyph::Globe, "Blocked apps", "Apps with at least one blocked direction.");
             theme::label(ui, blocked.to_string(), theme::regular(13.0), if blocked > 0 { c::bad() } else { c::muted() });
         });
         b.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            theme::search_box(ui, &mut self.search, 320.0, "Search apps, publishers, hosts");
+            theme::search_box(ui, &mut self.search, 320.0, "Search apps, publishers, hosts").on_hover_text("Filter by app name, publisher or host");
             if s.firewall_busy {
                 ui.add_space(12.0);
                 ui.add(egui::Spinner::new().size(18.0).color(c::accent()));
@@ -323,10 +324,21 @@ fn section(ui: &mut egui::Ui, width: f32, title: &str, count: usize, open: bool)
         p.rect_filled(r, CornerRadius::ZERO, c::hover().gamma_multiply(ht));
     }
     p.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0_f32, c::border().gamma_multiply(0.5)));
+    let resp = resp.on_hover_text(if open { "Click to collapse" } else { "Click to expand" });
+    let p = ui.painter();
     theme::glyph(p, Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(12.0)), if open { Glyph::ChevronDown } else { Glyph::Chevron }, c::muted());
     let tr = p.text(Pos2::new(r.left() + 36.0, r.center().y), Align2::LEFT_CENTER, title, theme::semibold(14.5), c::text());
     p.text(Pos2::new(tr.right() + 8.0, r.center().y), Align2::LEFT_CENTER, count.to_string(), theme::regular(13.0), c::muted());
     resp.clicked()
+}
+
+/// Toolbar heading with a leading glyph and a hover tooltip.
+fn title(ui: &mut egui::Ui, g: Glyph, text: &str, tip: &str) {
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(Vec2::splat(15.0), Sense::hover());
+        theme::glyph(ui.painter(), r, g, c::accent());
+        theme::label(ui, text, theme::semibold(15.0), c::text()).on_hover_text(tip);
+    });
 }
 
 fn sep(ui: &mut egui::Ui) {
