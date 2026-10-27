@@ -38,7 +38,9 @@ use crate::{
 
 use super::{
     epi_integration, event_loop_context,
-    winit_integration::{create_egui_context, EventResult, UserEvent, WinitApp},
+    winit_integration::{
+        create_egui_context, is_invisible_or_minimized, EventResult, UserEvent, WinitApp,
+    },
 };
 
 // ----------------------------------------------------------------------------
@@ -735,9 +737,11 @@ impl GlowWinitRunning<'_> {
 
         integration.maybe_autosave(app.as_mut(), Some(&window));
 
-        if window.is_minimized() == Some(true) {
+        if is_invisible_or_minimized(&window) {
             // On Mac, a minimized Window uses up all CPU:
             // https://github.com/emilk/egui/issues/325
+            // On Windows, an invisible window also uses up all CPU:
+            // https://github.com/emilk/egui/issues/7776
             profiling::scope!("minimized_sleep");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
