@@ -13,43 +13,29 @@ Re-checked against the code at `classic-graphite`. The tables below are the morn
 
 **Still missing** (excluding the Skip rows: premium, remote servers, community stats, credential check):
 
+**Done in the quick-win batch (commit 10cf40d):** G16 save graph as image, G18 graph colour presets, F8/F9 uninstalled apps, F12 NetEye/Defender guard, F13 Windows Firewall off warning, A10 delete one alert, A15 Event Log mirror, A16 alert retention, N6 device type, N7 forget, N8/N9 trusted devices, S14 hosts file monitor, D3 hide app, D6 search online, M6 tray actions, T3 text size, T8 24-hour clock, T9 history retention, U6 clear recent history.
+
+Still missing after that batch:
+
 | Area | Feature | Effort |
 |---|---|---|
 | Graph | Live connections page (G9; today: Connected now list + firewall row expansion) | M |
 | Graph | Live world map (G10) | L |
 | Graph | Block by country (G11, blocking half) | L |
-| Graph | Save graph as image (G16) | S |
-| Graph | Graph colour themes (G18) | S |
-| Firewall | Uninstalled section and remove old apps (F8, F9) | S |
-| Firewall | Guard NetEye itself and Defender from blocks (F12) | S |
-| Firewall | Warn when Windows Firewall is off (F13) | S |
 | Firewall | Settings/firewall password (F14, T11) | M |
 | Firewall | Custom IP/host/port rules (F17) | M |
-| Alerts | Delete a single alert (A10) | S |
 | Alerts | While You Were Away summary (A12) | M |
-| Alerts | Mirror to Windows Event Log (A15, T10) | S |
-| Alerts | Alert retention setting (A16; fixed 2,000) | S |
-| Things | Forget device (N7) | S |
-| Things | Trust devices, alert only on unknown ones (N8, N9) | S |
-| Things | Device type override (N6, second half) | S |
 | Things | Network info: DNS servers, saved Wi-Fi (N10) | M |
 | Security | Suspicious host list (S1) | L |
 | Security | Evil twin / open Wi-Fi alerts (S3, S4) | M |
 | Security | Camera and microphone use (S7) | M |
 | Security | Executable changed, publisher changed, signature lost (S8, S9, S10) | M |
-| Security | hosts file monitor (S14) | S |
 | Security | New network adapter/driver alert (S15) | M |
-| App details | Hide app, Incognito, Trust app (D3, D4, D5) | S–M |
-| App details | Search online (D6) | S |
+| App details | Incognito, Trust app (D4, D5) | M |
 | App details | Signed/unsigned status (D7) | M |
 | Tray | Mini Viewer with always-on-top (M2, M3) | M |
-| Tray | Tray menu actions: firewall mode, snooze, mini viewer (M6) | S |
 | Settings | Language selection (T1) | M |
-| Settings | Text size (T3) | S |
 | Settings | Update check / auto-update (T5, T6, A17) | M |
-| Settings | 24-hour clock option (T8) | S |
-| Settings | History retention setting (T9) | S |
-| Usage | Clear history for a date range (U6) | S |
 
 What Vantage was in the morning (confirmed in code): 6 pages (Traffic, Firewall, Activity, Scanner, Hardware, Settings; `ui/mod.rs:243-249`), per-app in/out block via persistent WFP filters (`wfp.rs:148`, `system.rs:36`), 7 event kinds (`store.rs` `EventKind`: NewApp, InternetUp, InternetDown, VersionChanged, NewDevice, Firewall, DataCap), 5 notification toggles (`ui/settings.rs:70-74`), tray with Open/Quit (`ui/mod.rs:480-523`), 24 h of per-minute and 32 days of per-hour buckets (`store.rs:10-11`).
 
