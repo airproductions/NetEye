@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-3d7bff?style=flat-square&logo=windows&logoColor=white">
   <img alt="Written in Rust" src="https://img.shields.io/badge/Rust-egui-14c8b4?style=flat-square&logo=rust&logoColor=white">
-  <img alt="MIT License" src="https://img.shields.io/badge/License-MIT-a78bfa?style=flat-square">
+  <img alt="MIT License" src="https://img.shields.io/badge/License-MIT-d08bfa?style=flat-square">
   <img alt="No telemetry" src="https://img.shields.io/badge/Telemetry-none-2dd4bf?style=flat-square">
 </p>
 

@@ -931,6 +931,29 @@ pub fn nice_max(v: f64) -> f64 {
     10.0 * mag
 }
 
+/// How many grid bands split a `nice_max` value so every label is round:
+/// 1 -> 5 (0.2), 2 -> 4 (0.5), 2.5 -> 5 (0.5), 5 -> 5 (1), 10 -> 5 (2).
+pub fn grid_divisions(nice: f64) -> usize {
+    if nice <= 0.0 {
+        return 4;
+    }
+    let lead = nice / 10f64.powf(nice.log10().floor());
+    if (lead - 2.0).abs() < 1e-6 { 4 } else { 5 }
+}
+
+/// Round tick times between `t0` and `t1` (unix seconds): the smallest common interval that
+/// gives at most `max_ticks` ticks, aligned to local wall-clock time (`offset` = seconds east of UTC).
+pub fn round_ticks(t0: i64, t1: i64, max_ticks: usize, offset: i64) -> Vec<i64> {
+    const STEPS: [i64; 17] = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800];
+    if t1 <= t0 || max_ticks == 0 {
+        return Vec::new();
+    }
+    let span = t1 - t0;
+    let step = STEPS.iter().copied().find(|s| span / s <= max_ticks as i64).unwrap_or(2_592_000);
+    let first = t0 + (step - (t0 + offset).rem_euclid(step)) % step;
+    (0..).map(|i| first + i * step).take_while(|t| *t <= t1).collect()
+}
+
 /// Tiny sparkline used in table rows.
 pub fn spark(p: &Painter, rect: Rect, down: &[f64], up: &[f64]) {
     let max = down.iter().chain(up.iter()).cloned().fold(0.0, f64::max);
@@ -1004,6 +1027,19 @@ pub fn fallback_icon(p: &Painter, rect: Rect, name: &str) {
 }
 
 /// Procedural logo, used for the window and tray icons.
+/// The eye logo tile, drawn from a cached texture (the same pixels as the window icon).
+pub fn logo(ui: &Ui, rect: Rect) {
+    let id = egui::Id::new("neteye.logo.texture");
+    let tex = ui.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(id)).unwrap_or_else(|| {
+        let px = 96;
+        let img = egui::ColorImage::from_rgba_unmultiplied([px, px], &logo_rgba(px as u32));
+        let t = ui.ctx().load_texture("neteye-logo", img, egui::TextureOptions::LINEAR);
+        ui.ctx().data_mut(|d| d.insert_temp(id, t.clone()));
+        t
+    });
+    ui.painter().image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+}
+
 pub fn logo_rgba(size: u32) -> Vec<u8> {
     let mut px = vec![0u8; (size * size * 4) as usize];
     let s = size as f32;
@@ -1046,6 +1082,25 @@ pub fn logo_rgba(size: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grid_divisions_give_round_labels() {
+        for (nice, want) in [(1.0, 5), (2.0, 4), (2.5, 5), (5.0, 5), (10.0, 5), (5_000_000.0, 5), (200_000.0, 4)] {
+            assert_eq!(grid_divisions(nice), want, "{nice}");
+        }
+    }
+
+    #[test]
+    fn round_ticks_land_on_minutes() {
+        // 10:16:42 .. 10:21:41 UTC: ticks at 10:17, 10:18, ... 10:21
+        let t0 = 36_000 + 16 * 60 + 42;
+        let t1 = 36_000 + 21 * 60 + 41;
+        let ticks = round_ticks(t0, t1, 6, 0);
+        assert_eq!(ticks, (17..=21).map(|m| 36_000 + m * 60).collect::<Vec<i64>>());
+        // a +2h offset still lands on whole local minutes
+        assert!(round_ticks(t0, t1, 6, 7200).iter().all(|t| (t + 7200) % 60 == 0));
+        assert!(round_ticks(5, 5, 6, 0).is_empty());
+    }
 
     #[test]
     fn column_layout_gives_hidden_width_to_the_rest() {

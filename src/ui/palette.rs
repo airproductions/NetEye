@@ -38,13 +38,13 @@ pub fn dark() -> Palette {
         selected: rgb(0x233352),
         border: rgb(0x2a2f39),
         text: rgb(0xe7eaf0),
-        muted: rgb(0x8d95a5),
-        faint: rgb(0x5c6370),
+        muted: rgb(0x9aa2b1),
+        faint: rgb(0x7a8291),
         accent: rgb(0x5b8dff),
         accent2: rgb(0x5b8dff),
         down: rgb(0x2dd4bf),
-        up: rgb(0xa78bfa),
-        good: rgb(0x34d399),
+        up: rgb(0xd08bfa),
+        good: rgb(0x4ade80),
         bad: rgb(0xf87171),
         warn: rgb(0xfbbf24),
         orange: rgb(0xfb923c),
@@ -62,12 +62,12 @@ pub fn light() -> Palette {
         selected: rgb(0xdde7fb),
         border: rgb(0xdcdfe5),
         text: rgb(0x1b1f27),
-        muted: rgb(0x5f6776),
-        faint: rgb(0x9aa1ad),
+        muted: rgb(0x4f5664),
+        faint: rgb(0x656c7a),
         accent: rgb(0x3b6fe0),
         accent2: rgb(0x3b6fe0),
         down: rgb(0x0f9f8f),
-        up: rgb(0x7c5cd6),
+        up: rgb(0x9b4fd6),
         good: rgb(0x16a34a),
         bad: rgb(0xdc2626),
         warn: rgb(0xb7791f),
@@ -130,6 +130,45 @@ mod tests {
         assert_eq!(current().bg, light().bg);
         set(dark());
         assert_eq!(current().bg, dark().bg);
+    }
+
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    fn hue(c: Color32) -> f32 {
+        let (r, g, b) = (c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0);
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let d = (max - min).max(1e-6);
+        let h = if max == r { ((g - b) / d).rem_euclid(6.0) } else if max == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 };
+        h * 60.0
+    }
+
+    fn hue_gap(a: Color32, b: Color32) -> f32 {
+        let d = (hue(a) - hue(b)).abs();
+        d.min(360.0 - d)
+    }
+
+    #[test]
+    fn small_text_meets_aa_on_every_surface() {
+        for p in [dark(), light()] {
+            for surface in [p.bg, p.panel, p.raised] {
+                assert!(contrast(p.muted, surface) >= 4.5, "muted {:?} on {:?}", p.muted, surface);
+                assert!(contrast(p.faint, surface) >= 3.9, "faint {:?} on {:?}", p.faint, surface);
+            }
+        }
+    }
+
+    #[test]
+    fn data_hues_stay_apart_from_accent_and_status() {
+        // download / upload must not read as the interactive accent or as a status colour
+        for p in [dark(), light()] {
+            assert!(hue_gap(p.up, p.accent) >= 40.0);
+            assert!(hue_gap(p.down, p.accent) >= 40.0);
+            assert!(hue_gap(p.down, p.up) >= 90.0);
+            assert!(hue_gap(p.down, p.good) >= 25.0);
+        }
     }
 
     #[test]

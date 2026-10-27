@@ -13,8 +13,8 @@
       <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
     </linearGradient>
     <linearGradient id="up" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.40"/>
-      <stop offset="1" stop-color="#a78bfa" stop-opacity="0"/>
+      <stop offset="0" stop-color="#d08bfa" stop-opacity="0.40"/>
+      <stop offset="1" stop-color="#d08bfa" stop-opacity="0"/>
     </linearGradient>
     <linearGradient id="fade" gradientUnits="userSpaceOnUse" x1="700" y1="0" x2="900" y2="0">
       <stop offset="0" stop-color="#171a20" stop-opacity="1"/>
@@ -34,7 +34,7 @@
     <path d="M700 400 L700 300 C760 290 790 230 850 240 S940 300 990 255 S1060 130 1110 150 S1190 250 1220 200 S1270 150 1280 155 L1280 400 Z" fill="url(#down)"/>
     <path d="M700 300 C760 290 790 230 850 240 S940 300 990 255 S1060 130 1110 150 S1190 250 1220 200 S1270 150 1280 155" fill="none" stroke="#2dd4bf" stroke-width="3"/>
     <path d="M700 400 L700 352 C760 348 800 322 860 330 S950 350 1010 318 S1080 270 1130 290 S1210 330 1240 305 S1272 290 1280 292 L1280 400 Z" fill="url(#up)"/>
-    <path d="M700 352 C760 348 800 322 860 330 S950 350 1010 318 S1080 270 1130 290 S1210 330 1240 305 S1272 290 1280 292" fill="none" stroke="#a78bfa" stroke-width="3"/>
+    <path d="M700 352 C760 348 800 322 860 330 S950 350 1010 318 S1080 270 1130 290 S1210 330 1240 305 S1272 290 1280 292" fill="none" stroke="#d08bfa" stroke-width="3"/>
     <circle cx="1110" cy="150" r="6" fill="#2dd4bf"/>
     <circle cx="1110" cy="150" r="14" fill="none" stroke="#2dd4bf" stroke-opacity="0.35" stroke-width="2"/>
     <rect x="690" width="220" height="400" fill="url(#fade)"/>
@@ -55,7 +55,7 @@
     <!-- legend -->
     <g font-family="Manrope, 'Segoe UI', Inter, Arial, sans-serif" font-size="15" fill="#8d95a5">
       <circle cx="1096" cy="44" r="5" fill="#2dd4bf"/><text x="1108" y="49">Download</text>
-      <circle cx="1196" cy="44" r="5" fill="#a78bfa"/><text x="1208" y="49">Upload</text>
+      <circle cx="1196" cy="44" r="5" fill="#d08bfa"/><text x="1208" y="49">Upload</text>
     </g>
   </g>
 </svg>

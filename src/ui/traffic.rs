@@ -160,6 +160,11 @@ fn connected_cells(rate: [u64; 2], admin: bool) -> [String; 2] {
     if admin { [theme::rate(rate[0] as f64), theme::rate(rate[1] as f64)] } else { [DASH.to_string(), DASH.to_string()] }
 }
 
+/// "Connected now" in limited mode: Windows gives connection counts but no per-app bytes.
+fn conn_label(n: usize) -> String {
+    format!("{n} connection{}", if n == 1 { "" } else { "s" })
+}
+
 /// Whether picking time-menu entry `i` (while `cur` is shown) sets a new span. Day, Week and
 /// Month (5-7) always do, so picking the kind already shown snaps back to the current period.
 fn span_pick_applies(i: usize, cur: usize) -> bool {
@@ -249,7 +254,7 @@ fn period_label(span: Span) -> String {
 
 /// Time axis label for a sample at `t` in a window of `len` seconds.
 fn tick_label(step: i64, len: i64, t: i64) -> String {
-    if step < MINUTE {
+    if step < MINUTE && t % MINUTE != 0 {
         theme::local(t).format("%-I:%M:%S").to_string()
     } else if step < HOUR {
         theme::clock(t)
@@ -393,6 +398,8 @@ fn chip(ui: &mut egui::Ui, text: &str, color: Color32, tip: &str) -> egui::Respo
 }
 
 pub struct TrafficPage {
+    /// The chart's title row; the graph draws its scale menu and pause button at its right end.
+    title_row: Rect,
     span: Span,
     mode: usize,
     sel: Sel,
@@ -421,6 +428,7 @@ const SCRUB_TAIL: f32 = 60.0;
 impl Default for TrafficPage {
     fn default() -> Self {
         Self {
+            title_row: Rect::NOTHING,
             span: Span::Preset(0),
             mode: 0,
             sel: Sel::All,
@@ -619,9 +627,15 @@ impl TrafficPage {
                     icons.draw(ui, s, k, ir, name);
                     let p = ui.painter();
                     theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), c::text(), text_w);
-                    let cells = connected_cells(*rate, s.admin);
-                    for (ci, (col, _)) in cols.iter().enumerate() {
-                        theme::text_right(p, Pos2::new(col_x(ci), row.center().y), &cells[usize::from(*col) - 1], theme::regular(13.0), c::muted());
+                    if s.admin {
+                        let cells = connected_cells(*rate, true);
+                        for (ci, (col, _)) in cols.iter().enumerate() {
+                            theme::text_right(p, Pos2::new(col_x(ci), row.center().y), &cells[usize::from(*col) - 1], theme::regular(13.0), c::muted());
+                        }
+                    } else if !cols.is_empty() {
+                        // no speeds without admin: say what we do know, in one muted cell
+                        let tr = theme::text_right(p, Pos2::new(col_x(cols.len() - 1), row.center().y), &conn_label(*n), theme::regular(12.5), c::muted());
+                        p.circle_filled(Pos2::new(tr.left() - 9.0, row.center().y), 3.0, c::good());
                     }
                     app_popup::link(ui, ui.id().with((k, "app-link")), ir, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), text_w, k, actions);
                     resp.on_hover_text(format!("{n} connection{}", if *n == 1 { "" } else { "s" }));
@@ -739,8 +753,9 @@ impl TrafficPage {
             eresp.on_hover_text("Needs administrator mode");
         }
 
-        // title row: what the chart and strip are showing
+        // title row: what the chart and strip are showing (the graph puts its controls at its right end)
         let title = Rect::from_min_size(Pos2::new(r.left(), r.top() + 44.0), Vec2::new(r.width(), 28.0));
+        self.title_row = title;
         let mut tui = ui.new_child(egui::UiBuilder::new().max_rect(title).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let shown = match &self.sel {
             Sel::All => None,
@@ -765,7 +780,7 @@ impl TrafficPage {
         }
 
         // the timeline scrubber sits under the Graph and Bars views, for the preset spans only
-        let scrub = self.mode != 1 && matches!(self.span, Span::Preset(_));
+        let scrub = self.mode != 1 && matches!(self.span, Span::Preset(p) if p > 0);
         let bottom = if scrub { r.bottom() - SCRUB_H - 30.0 } else { r.bottom() - 28.0 };
         let chart = Rect::from_min_max(Pos2::new(r.left(), r.top() + 90.0), Pos2::new(r.right(), bottom));
         match self.mode {
@@ -793,14 +808,15 @@ impl TrafficPage {
             return;
         }
         let len = n as i64 * agg.step;
-        let ticks = ((chart.width() / 130.0) as usize).clamp(2, 12);
-        for i in 0..=ticks {
-            let idx = (n - 1) * i / ticks;
-            let x = chart.left() + chart.width() * idx as f32 / (n - 1) as f32;
-            let label = tick_label(agg.step, len, agg.times[idx]);
+        let (t0, t1) = (agg.times[0], agg.times[n - 1]);
+        let offset = i64::from(chrono::Local::now().offset().local_minus_utc());
+        let max_ticks = ((chart.width() / 110.0) as usize).clamp(2, 12);
+        for t in theme::round_ticks(t0, t1, max_ticks, offset) {
+            let x = chart.left() + chart.width() * (t - t0) as f32 / (t1 - t0) as f32;
             p.line_segment([Pos2::new(x, chart.bottom()), Pos2::new(x, chart.bottom() + 4.0)], Stroke::new(1.0_f32, c::border()));
-            let align = if i == 0 { Align2::LEFT_TOP } else if i == ticks { Align2::RIGHT_TOP } else { Align2::CENTER_TOP };
-            p.text(Pos2::new(x, chart.bottom() + 8.0), align, label, theme::regular(12.0), c::muted());
+            // keep edge labels inside the chart
+            let align = if x - chart.left() < 30.0 { Align2::LEFT_TOP } else if chart.right() - x < 30.0 { Align2::RIGHT_TOP } else { Align2::CENTER_TOP };
+            p.text(Pos2::new(x, chart.bottom() + 8.0), align, tick_label(agg.step, len, t), theme::regular(12.0), c::muted());
         }
     }
 
@@ -830,10 +846,11 @@ impl TrafficPage {
             return;
         }
         let nice = fixed.unwrap_or_else(|| theme::nice_max(max));
-        for i in 1..=4 {
-            let y = plot.bottom() - plot.height() * i as f32 / 4.0;
+        let bands = theme::grid_divisions(nice);
+        for i in 1..=bands {
+            let y = plot.bottom() - plot.height() * i as f32 / bands as f32;
             p.line_segment([Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)], Stroke::new(1.0_f32, c::border()));
-            p.text(Pos2::new(plot.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::rate(nice * i as f64 / 4.0), theme::regular(11.5), c::faint());
+            p.text(Pos2::new(plot.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::rate(nice * i as f64 / bands as f64), theme::regular(11.5), c::muted());
         }
         p.line_segment([plot.left_bottom(), plot.right_bottom()], Stroke::new(1.0_f32, c::border()));
         // a new live sample slides the series in from the left over NORMAL; not once the newest
@@ -915,11 +932,24 @@ impl TrafficPage {
         self.graph_controls(ui, s, plot, agg, fixed.is_some() && max > nice);
     }
 
-    /// Plot overlays: the scale menu (top-left, with the clipped note) and the pause button with
-    /// its chip (top-right). Drawn after the plot so they take the pointer first.
-    fn graph_controls(&mut self, ui: &mut egui::Ui, s: &mut Shared, plot: Rect, agg: &Arc<Agg>, clipped: bool) {
-        let bar = Rect::from_min_size(plot.min + Vec2::new(4.0, 4.0), Vec2::new((plot.width() - 8.0).max(0.0), 24.0));
-        let mut left = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    /// Graph controls at the right end of the title row: pause (with its chip), then the scale
+    /// menu and the clipped note, so nothing sits on top of the plot.
+    fn graph_controls(&mut self, ui: &mut egui::Ui, s: &mut Shared, _plot: Rect, agg: &Arc<Agg>, clipped: bool) {
+        let bar = self.title_row;
+        let mut right = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        let paused = self.paused.is_some();
+        let (g, tip) = if paused { (Glyph::Play, "Resume the graph") } else { (Glyph::Pause, "Pause the graph") };
+        if theme::icon_button(&mut right, g, 28.0, tip).clicked() {
+            self.paused = if paused { None } else { Some(agg.clone()) };
+        }
+        if paused {
+            right.add_space(4.0);
+            if chip(&mut right, "Paused", c::warn(), "The graph is frozen; click to resume").clicked() {
+                self.paused = None;
+            }
+        }
+        right.add_space(6.0);
+        let mut left = right;
         let labels: Vec<String> = markers::SCALE_PRESETS.iter().map(|v| if *v > 0.0 { theme::rate(*v) } else { "Auto".to_string() }).collect();
         let items: Vec<&str> = labels.iter().map(String::as_str).collect();
         let slot = scale_slot(&mut s.store.data.settings, self.span);
@@ -930,21 +960,12 @@ impl TrafficPage {
                 s.store.mark_dirty();
             }
         }
+        // right to left: "Scale" sits just before its menu, the clipped note before that
+        left.add_space(4.0);
+        theme::label(&mut left, "Scale", theme::regular(12.5), c::muted());
         if clipped {
-            left.add_space(8.0);
+            left.add_space(10.0);
             theme::label(&mut left, "▲ clipped", theme::semibold(11.5), c::warn()).on_hover_text("Traffic is above the chosen scale");
-        }
-        let mut right = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::right_to_left(egui::Align::Center)));
-        let paused = self.paused.is_some();
-        let (g, tip) = if paused { (Glyph::Play, "Resume the graph") } else { (Glyph::Pause, "Pause the graph") };
-        if theme::icon_button(&mut right, g, 24.0, tip).clicked() {
-            self.paused = if paused { None } else { Some(agg.clone()) };
-        }
-        if paused {
-            right.add_space(4.0);
-            if chip(&mut right, "Paused", c::warn(), "The graph is frozen; click to resume").clicked() {
-                self.paused = None;
-            }
         }
     }
 
@@ -963,7 +984,7 @@ impl TrafficPage {
         let p = ui.painter_at(lane);
         let cy = lane.center().y;
         for cl in markers::clusters(&pts, t0, t1, lane.left() + shift, lane.width(), markers::MIN_GAP) {
-            let r = Rect::from_center_size(Pos2::new(cl.x, cy), Vec2::splat(13.0));
+            let r = Rect::from_center_size(Pos2::new(cl.x, cy), Vec2::splat(15.0));
             theme::glyph(&p, r, Glyph::Clock, c::accent());
             let n = cl.events.len();
             if n > 1 {
@@ -972,7 +993,7 @@ impl TrafficPage {
                 p.text(bc, Align2::CENTER_CENTER, if n > 9 { "9+".to_string() } else { n.to_string() }, theme::bold(8.5), Color32::WHITE);
             }
             let Some(first) = cl.events.first() else { continue };
-            let resp = ui.interact(r.expand(3.0).intersect(lane), ui.id().with(("marker", *first)), Sense::hover());
+            let resp = ui.interact(r.expand(6.0), ui.id().with(("marker", *first)), Sense::hover());
             if resp.hovered() {
                 let lines: Vec<(String, String)> = cl
                     .events
@@ -1238,13 +1259,15 @@ impl TrafficPage {
         let tot_font = theme::semibold(13.5);
         let tot_w = motion::num_slot(ui, &tot_font, "999.99 GB");
         let bar_x = x + 22.0 + tot_w + 10.0;
-        let bar_w = (rows_right - bar_x).clamp(40.0, 260.0);
+        let bar_w = (rows_right - bar_x - 70.0).clamp(40.0, 260.0);
         let sum = |v: [u64; 2]| v[0] as f64 + v[1] as f64;
         let maxv = sum(wan).max(sum(lan)).max(1.0);
         for (i, (gl, tip, v)) in [(Glyph::Globe, "Internet", wan), (Glyph::Wifi, "Local network", lan)].into_iter().enumerate() {
             let mut p = p.clone();
             if ndim[i] {
                 p.multiply_opacity(0.35);
+            } else if sum(v) == 0.0 {
+                p.multiply_opacity(0.55);
             }
             let y = cy + if i == 0 { -14.0 } else { 14.0 };
             let ir = Rect::from_center_size(Pos2::new(x + 8.0, y), Vec2::splat(16.0));
@@ -1255,6 +1278,7 @@ impl TrafficPage {
             p.text(Pos2::new(x + 22.0 + tot_w, y), Align2::RIGHT_CENTER, theme::bytes(t as u64), tot_font.clone(), c::text());
             let track = Rect::from_min_size(Pos2::new(bar_x, y - 4.0), Vec2::new(bar_w, 8.0));
             p.rect_filled(track, CornerRadius::same(4), c::raised());
+            p.text(Pos2::new(track.right() + 10.0, y), Align2::LEFT_CENTER, if i == 0 { "Internet" } else { "Local" }, theme::regular(12.5), c::muted());
             let frac = (motion::gated(&ctx, id.with(("barfrac", i)), sum(v) / maxv, ease) as f32).clamp(0.0, 1.0);
             let fill_w = bar_w * frac;
             if fill_w >= 1.0 && sum(v) > 0.0 {
@@ -1263,7 +1287,7 @@ impl TrafficPage {
                 if wd >= 1.0 {
                     let dr = Rect::from_min_size(track.min, Vec2::new(wd, 8.0));
                     let mut mesh = egui::Mesh::default();
-                    let (c0, c1) = (c::accent(), c::accent2());
+                    let (c0, c1) = (c::down(), c::down());
                     let sl = 12;
                     for k in 0..=sl {
                         let f = k as f32 / sl as f32;
@@ -1594,6 +1618,12 @@ mod tests {
             assert!(!span_pick_applies(i, i));
         }
         assert!(span_pick_applies(1, 0));
+    }
+
+    #[test]
+    fn conn_label_counts() {
+        assert_eq!(conn_label(1), "1 connection");
+        assert_eq!(conn_label(110), "110 connections");
     }
 
     #[test]

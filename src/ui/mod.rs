@@ -386,15 +386,14 @@ impl NetEyeApp {
 
         // Brand
         let logo = Rect::from_min_size(Pos2::new(full.left() + 18.0, full.center().y - 15.0), Vec2::splat(30.0));
-        p.rect_filled(logo, CornerRadius::same(8), c::accent());
-        theme::glyph(&p, logo.shrink(6.0), Glyph::Traffic, Color32::WHITE);
+        theme::logo(ui, logo);
         p.text(Pos2::new(logo.right() + 10.0, full.center().y - 8.0), Align2::LEFT_CENTER, "NetEye", theme::semibold(17.0), c::text());
         p.text(
             Pos2::new(logo.right() + 10.0, full.center().y + 11.0),
             Align2::LEFT_CENTER,
-            if admin { "FULL MONITORING" } else { "LIMITED MODE" },
-            theme::semibold(10.5),
-            if admin { c::good() } else { c::warn() },
+            if admin { "Full monitoring" } else { "Limited mode" },
+            theme::regular(11.5),
+            c::muted(),
         );
 
         const TABS: [(Page, Glyph, &str, &str); 5] = [
