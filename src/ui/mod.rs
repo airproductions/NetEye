@@ -51,6 +51,8 @@ pub struct VantageApp {
     page_changed: Instant,
     theme: Option<egui::Theme>,
     theme_fade: (palette::Palette, palette::Palette, Instant),
+    /// Debug builds: (last log time, pass number then) for the frames-per-10s diag line.
+    frame_log: (Instant, u64),
     quit: Arc<AtomicBool>,
     _tray: Option<tray_icon::TrayIcon>,
 }
@@ -80,6 +82,7 @@ impl VantageApp {
             page_changed: Instant::now() - std::time::Duration::from_secs(1),
             theme: None,
             theme_fade: (palette::dark(), palette::dark(), Instant::now()),
+            frame_log: (Instant::now(), 0),
             quit,
             _tray: tray,
         }
@@ -108,8 +111,12 @@ impl VantageApp {
 
 impl eframe::App for VantageApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.log_frames(ctx);
         let quitting = self.quit.load(Ordering::SeqCst);
-        let close_to_tray = self.monitor.lock().store.data.settings.close_to_tray && self._tray.is_some();
+        let (close_to_tray, appearance) = {
+            let s = self.monitor.lock();
+            (s.store.data.settings.close_to_tray && self._tray.is_some(), s.store.data.settings.appearance)
+        };
         if ctx.input(|i| i.viewport().close_requested()) && close_to_tray && !quitting {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -119,7 +126,7 @@ impl eframe::App for VantageApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
-        self.update_theme(ctx);
+        self.update_theme(ctx, appearance);
         backdrop::paint_backdrop(&ctx.layer_painter(egui::LayerId::background()), ctx.screen_rect());
         let mut actions = Vec::new();
         {
@@ -144,8 +151,8 @@ impl eframe::App for VantageApp {
                         ui.painter().rect(
                             bar,
                             CornerRadius::same(10),
-                            Color32::from_rgba_unmultiplied(w.r(), w.g(), w.b(), 28),
-                            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(w.r(), w.g(), w.b(), 60)),
+                            theme::with_alpha(w, 28),
+                            Stroke::new(1.0_f32, theme::with_alpha(w, 60)),
                             egui::StrokeKind::Inside,
                         );
                         ui.horizontal_centered(|ui| {
@@ -193,15 +200,15 @@ impl eframe::App for VantageApp {
 impl VantageApp {
     /// Follows the Appearance setting: switches the palette (cross-fading over `motion::NORMAL`),
     /// egui's visuals and the native title bar. The first call applies the theme with no fade.
-    fn update_theme(&mut self, ctx: &egui::Context) {
-        let appearance = appearance_override().unwrap_or_else(|| self.monitor.lock().store.data.settings.appearance);
+    fn update_theme(&mut self, ctx: &egui::Context, appearance: crate::store::Appearance) {
+        let appearance = appearance_override().unwrap_or(appearance);
         let target = crate::store::resolve(appearance, ctx.system_theme());
         let pal_for = |t: egui::Theme| if t == egui::Theme::Light { palette::light() } else { palette::dark() };
         if self.theme != Some(target) {
             let first = self.theme.is_none();
             let from = if first { pal_for(target) } else { palette::current() };
             self.theme = Some(target);
-            self.theme_fade = (from, pal_for(target), Instant::now());
+            self.theme_fade = (from, pal_for(target), theme_fade_start(first, Instant::now()));
             ctx.set_theme(target);
             // System keeps following the OS; a forced theme would hide later OS changes from `system_theme`
             let native = match appearance {
@@ -239,8 +246,7 @@ impl VantageApp {
         egui::SidePanel::left("rail").exact_width(64.0).resizable(false).frame(egui::Frame::default()).show(ctx, |ui| {
             let full = ui.max_rect();
             let p = ui.painter().clone();
-            let g = c::glass_top();
-            p.rect_filled(full, CornerRadius::ZERO, Color32::from_rgba_unmultiplied(g.r(), g.g(), g.b(), g.a() / 2));
+            p.rect_filled(full, CornerRadius::ZERO, c::glass_top().gamma_multiply(0.5));
             p.line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, c::glass_border()));
 
             let (logo, slots, gear) = rail_slots(full, PAGES.len());
@@ -322,11 +328,11 @@ impl VantageApp {
     fn draw_toast(&mut self, ctx: &egui::Context) {
         let Some((msg, at)) = &self.toast else { return };
         let age = at.elapsed().as_secs_f32();
-        if age > 4.5 {
+        let Some(next) = toast_repaint(age) else {
             self.toast = None;
             return;
-        }
-        let alpha = ((4.5 - age) / 0.4).clamp(0.0, 1.0);
+        };
+        let alpha = ((TOAST_LIFE - age) / TOAST_FADE).clamp(0.0, 1.0);
         let screen = ctx.screen_rect();
         let off = 16.0 * (1.0 - motion::ease_out(age / motion::NORMAL));
         egui::Area::new("toast".into())
@@ -342,7 +348,51 @@ impl VantageApp {
                     });
                 });
             });
-        ctx.request_repaint();
+        // every frame only while it slides in or fades out; one wake-up at the fade while it holds
+        if next.is_zero() {
+            ctx.request_repaint();
+        } else {
+            ctx.request_repaint_after(next);
+        }
+    }
+
+    /// Debug builds log how many frames ran in each 10 s window, to check idle repaint cost.
+    fn log_frames(&mut self, ctx: &egui::Context) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let (since, pass) = self.frame_log;
+        if since.elapsed().as_secs() >= 10 {
+            let now = ctx.cumulative_pass_nr();
+            crate::diag::log(&format!("frames: {} in {:.1}s on {}", now - pass, since.elapsed().as_secs_f32(), page_title(self.page)));
+            self.frame_log = (Instant::now(), now);
+        }
+    }
+}
+
+/// Toast lifetime and its fade-out at the end, in seconds.
+const TOAST_LIFE: f32 = 4.5;
+const TOAST_FADE: f32 = 0.4;
+
+/// When a toast of this age next needs a frame: every frame (ZERO) while it slides in or fades out,
+/// once at the start of the fade while it holds, and never after it has gone.
+fn toast_repaint(age: f32) -> Option<std::time::Duration> {
+    let fade_at = TOAST_LIFE - TOAST_FADE;
+    if age > TOAST_LIFE {
+        None
+    } else if age < motion::NORMAL || age >= fade_at {
+        Some(std::time::Duration::ZERO)
+    } else {
+        Some(std::time::Duration::from_secs_f32(fade_at - age))
+    }
+}
+
+/// Start time of the palette cross-fade. The first theme is applied directly, so its fade is already over.
+fn theme_fade_start(first: bool, now: Instant) -> Instant {
+    if first {
+        now.checked_sub(std::time::Duration::from_secs_f32(motion::NORMAL * 2.0)).unwrap_or(now)
+    } else {
+        now
     }
 }
 
@@ -480,6 +530,39 @@ mod tests {
         assert_eq!(slots[0].size(), Vec2::splat(40.0));
         assert_eq!(slots[0].top(), 64.0);
         assert_eq!(slots[1].top() - slots[0].bottom(), 10.0);
+    }
+
+    #[test]
+    fn toast_repaints_every_frame_while_sliding_in() {
+        assert_eq!(toast_repaint(0.0), Some(std::time::Duration::ZERO));
+        assert_eq!(toast_repaint(motion::NORMAL * 0.9), Some(std::time::Duration::ZERO));
+    }
+
+    #[test]
+    fn toast_hold_waits_for_fade() {
+        let d = toast_repaint(1.0).unwrap();
+        let want = TOAST_LIFE - TOAST_FADE - 1.0;
+        assert!((d.as_secs_f32() - want).abs() < 1e-3, "{d:?}");
+        assert!(toast_repaint(motion::NORMAL + 0.01).unwrap() > std::time::Duration::from_secs(3));
+    }
+
+    #[test]
+    fn toast_repaints_every_frame_while_fading() {
+        assert_eq!(toast_repaint(TOAST_LIFE - TOAST_FADE), Some(std::time::Duration::ZERO));
+        assert_eq!(toast_repaint(TOAST_LIFE - 0.01), Some(std::time::Duration::ZERO));
+    }
+
+    #[test]
+    fn toast_gone_needs_no_frames() {
+        assert_eq!(toast_repaint(TOAST_LIFE + 0.01), None);
+    }
+
+    #[test]
+    fn first_theme_has_no_fade() {
+        let now = Instant::now();
+        let start = theme_fade_start(true, now);
+        assert!(now.duration_since(start).as_secs_f32() >= motion::NORMAL);
+        assert_eq!(theme_fade_start(false, now), now);
     }
 
     #[test]

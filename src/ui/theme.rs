@@ -18,7 +18,7 @@ pub mod c {
         ($($f:ident),*) => { $(pub fn $f() -> Color32 { super::super::palette::current().$f })* };
     }
     accessors!(
-        bg, panel, raised, row_alt, hover, selected, border, text, muted, faint, accent, accent2, down, up, good, bad, warn, orange,
+        bg, raised, row_alt, hover, selected, border, text, muted, faint, accent, accent2, down, up, good, bad, warn, orange,
         bg_glow, bg_mid, bg_deep, glass_top, glass_bottom, glass_border, shadow, mesh_line, mesh_node, glow
     );
 }
@@ -617,8 +617,7 @@ pub fn glow(p: &Painter, r: Rect, radius: u8, t: f32) {
     if t <= 0.0 {
         return;
     }
-    let g = c::glow();
-    let col = Color32::from_rgba_unmultiplied(g.r(), g.g(), g.b(), (g.a() as f32 * t.min(1.0)) as u8);
+    let col = c::glow().gamma_multiply(t.min(1.0));
     p.add(egui::Shadow { offset: [0, 0], blur: 18, spread: 0, color: col }.as_shape(r, CornerRadius::same(radius)));
 }
 
@@ -640,8 +639,8 @@ pub fn area(p: &Painter, rect: Rect, values: &[f64], max: f64, color: Color32) {
             Pos2::new(x, y)
         })
         .collect();
-    let top = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 80);
-    let bottom = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 6);
+    let top = with_alpha(color, 80);
+    let bottom = with_alpha(color, 6);
     let mut mesh = Mesh::default();
     for (i, pnt) in pts.iter().enumerate() {
         let t = ((rect.bottom() - pnt.y) / rect.height()).clamp(0.0, 1.0);
@@ -657,20 +656,49 @@ pub fn area(p: &Painter, rect: Rect, values: &[f64], max: f64, color: Color32) {
     p.add(Shape::line(pts, Stroke::new(1.6_f32, color)));
 }
 
+/// The parts of `left..right` not covered by any of `holes` (each `(start, end)`), in order.
+pub fn gaps(left: f32, right: f32, holes: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let mut holes = holes.to_vec();
+    holes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = Vec::new();
+    let mut x = left;
+    for (a, b) in holes {
+        if a > x {
+            out.push((x, a.min(right)));
+        }
+        x = x.max(b);
+        if x >= right {
+            break;
+        }
+    }
+    if x < right {
+        out.push((x, right));
+    }
+    out.retain(|(a, b)| b > a);
+    out
+}
+
+/// `col` with its alpha replaced by `a`, keeping the unmultiplied colour (`Color32` channels are premultiplied).
+pub fn with_alpha(col: Color32, a: u8) -> Color32 {
+    let [r, g, b, _] = col.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, a)
+}
+
 /// Draws horizontal gridlines with a max label at the top right and a title at top left.
 pub fn chart_frame(p: &Painter, rect: Rect, title: &str, max_label: &str) {
+    const PAD: f32 = 8.0;
     let y = rect.top();
-    p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0_f32, c::border()));
     let font = regular(13.0);
-    // Label knockouts: a glass pill behind each label, since there is no solid page background.
-    let pill = |r: Rect| p.rect_filled(r.expand2(Vec2::new(8.0, 2.0)), CornerRadius::same(9), c::glass_top());
     let tg = p.layout_no_wrap(title.to_string(), font.clone(), c::muted());
     let tr = Align2::LEFT_CENTER.anchor_size(Pos2::new(rect.left(), y), tg.size());
-    pill(tr);
-    p.galley(tr.min, tg, c::muted());
     let mg = p.layout_no_wrap(max_label.to_string(), font, c::muted());
     let mr = Align2::RIGHT_CENTER.anchor_size(Pos2::new(rect.right(), y), mg.size());
-    pill(mr);
+    // the gridline stops short of each label, since there is no solid background to knock it out with
+    let holes = [(tr.left() - PAD, tr.right() + PAD), (mr.left() - PAD, mr.right() + PAD)];
+    for (a, b) in gaps(rect.left(), rect.right(), &holes) {
+        p.line_segment([Pos2::new(a, y), Pos2::new(b, y)], Stroke::new(1.0_f32, c::border()));
+    }
+    p.galley(tr.min, tg, c::muted());
     p.galley(mr.min, mg, c::muted());
 }
 
@@ -821,6 +849,54 @@ mod tests {
         let m = lerp_color(Color32::TRANSPARENT, c, 0.5);
         assert!((m.a() as i32 - c.a() as i32 / 2).abs() <= 1, "alpha {}", m.a());
         assert!((m.r() as i32 - c.r() as i32 / 2).abs() <= 1, "red {}", m.r());
+    }
+
+    #[test]
+    fn with_alpha_on_translucent_keeps_unmultiplied_colour() {
+        // the old `from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)` fed premultiplied channels back in and darkened the colour
+        let c = Color32::from_rgba_unmultiplied(60, 120, 255, 90);
+        let w = with_alpha(c, 45);
+        assert_eq!(w.a(), 45);
+        let (got, want) = (w.to_srgba_unmultiplied(), c.to_srgba_unmultiplied());
+        for i in 0..3 {
+            assert!((got[i] as i32 - want[i] as i32).abs() <= 3, "{got:?} vs {want:?}");
+        }
+    }
+
+    #[test]
+    fn gamma_multiply_scales_translucent_alpha() {
+        // the replacement used for glow(), the rail strip and the mesh halo: egui blends premultiplied
+        // channels, so a weaker copy of a colour keeps each channel's ratio to alpha
+        let c = Color32::from_rgba_unmultiplied(60, 120, 255, 90);
+        let ratios = |x: Color32| [x.r(), x.g(), x.b()].map(|v| v as f32 / x.a() as f32);
+        let off = |x: Color32| ratios(x).iter().zip(ratios(c)).map(|(a, b)| ((a - b) / b).abs()).fold(0.0, f32::max);
+        let h = c.gamma_multiply(0.25);
+        assert_eq!(h.a(), (c.a() as f32 * 0.25 + 0.5) as u8);
+        assert!(off(h) < 0.1, "{h:?} vs {c:?}");
+        let old = Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), c.a() / 4);
+        assert!(off(old) > 0.25, "old pattern shifts the colour: {old:?} vs {c:?}");
+    }
+
+    #[test]
+    fn gaps_without_holes() {
+        assert_eq!(gaps(0.0, 100.0, &[]), vec![(0.0, 100.0)]);
+    }
+
+    #[test]
+    fn gaps_skip_holes() {
+        assert_eq!(gaps(0.0, 100.0, &[(20.0, 30.0)]), vec![(0.0, 20.0), (30.0, 100.0)]);
+        assert_eq!(gaps(0.0, 100.0, &[(80.0, 110.0), (-5.0, 10.0)]), vec![(10.0, 80.0)]);
+    }
+
+    #[test]
+    fn gaps_merge_overlapping_holes() {
+        assert_eq!(gaps(0.0, 100.0, &[(25.0, 40.0), (10.0, 30.0)]), vec![(0.0, 10.0), (40.0, 100.0)]);
+    }
+
+    #[test]
+    fn gaps_fully_covered() {
+        assert!(gaps(0.0, 100.0, &[(-1.0, 60.0), (50.0, 101.0)]).is_empty());
+        assert!(gaps(0.0, 100.0, &[(0.0, 100.0)]).is_empty());
     }
 
     #[test]

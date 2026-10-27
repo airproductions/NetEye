@@ -1,9 +1,10 @@
 //! Window backdrop: a radial navy glow and a faint, static network mesh behind the glass cards.
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
-use eframe::egui::{epaint::Vertex, Color32, Mesh, Painter, Pos2, Rect, Shape, Stroke};
+use eframe::egui::{epaint::Vertex, Mesh, Painter, Pos2, Rect, Shape, Stroke};
 
+use super::palette::{self, Palette};
 use super::theme::{c, lerp_color};
 
 const SEED: u64 = 0x5eed_a17a;
@@ -40,9 +41,38 @@ fn graph() -> &'static (Vec<Pos2>, Vec<(usize, usize)>) {
     G.get_or_init(|| mesh_graph(SEED, NODES))
 }
 
+/// Holds one value built for a (rect, palette) pair; rebuilds only when either changes.
+struct Cached<T> {
+    entry: Option<(Rect, Palette, T)>,
+}
+
+impl<T: Clone> Cached<T> {
+    const fn new() -> Self {
+        Cached { entry: None }
+    }
+
+    fn get(&mut self, rect: Rect, pal: Palette, build: impl FnOnce() -> T) -> T {
+        match &self.entry {
+            Some((r, p, v)) if *r == rect && *p == pal => v.clone(),
+            _ => {
+                let v = build();
+                self.entry = Some((rect, pal, v.clone()));
+                v
+            }
+        }
+    }
+}
+
 /// Paints the gradient and the mesh. Call on a background layer before any panel content.
+/// The shapes are built once per window size and palette, then reused every frame.
 pub fn paint_backdrop(p: &Painter, rect: Rect) {
-    let p = p.with_clip_rect(rect);
+    static CACHE: Mutex<Cached<Shape>> = Mutex::new(Cached::new());
+    let shape = CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(rect, palette::current(), || build(rect));
+    p.with_clip_rect(rect).add(shape);
+}
+
+fn build(rect: Rect) -> Shape {
+    let mut out = Vec::new();
     let (glow, mid, deep) = (c::bg_glow(), c::bg_mid(), c::bg_deep());
     let centre = Pos2::new(rect.left() + rect.width() * 0.65, rect.top() - rect.height() * 0.1);
     let radius = [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()]
@@ -71,21 +101,22 @@ pub fn paint_backdrop(p: &Painter, rect: Rect) {
             mesh.add_triangle(i + 1, i + row + 1, i + row);
         }
     }
-    p.add(Shape::mesh(mesh));
+    out.push(Shape::mesh(mesh));
 
     let (nodes, edges) = graph();
     let at = |q: Pos2| Pos2::new(rect.left() + q.x * rect.width(), rect.top() + q.y * rect.height());
     let line = Stroke::new(0.8_f32, c::mesh_line());
     for &(a, b) in edges {
-        p.line_segment([at(nodes[a]), at(nodes[b])], line);
+        out.push(Shape::line_segment([at(nodes[a]), at(nodes[b])], line));
     }
     let node = c::mesh_node();
-    let halo = Color32::from_rgba_unmultiplied(node.r(), node.g(), node.b(), node.a() / 4);
+    let halo = node.gamma_multiply(0.25);
     for (i, q) in nodes.iter().enumerate() {
         let r = 1.3 + (i % 3) as f32 * 0.5;
-        p.circle_filled(at(*q), r * 2.2, halo);
-        p.circle_filled(at(*q), r, node);
+        out.push(Shape::circle_filled(at(*q), r * 2.2, halo));
+        out.push(Shape::circle_filled(at(*q), r, node));
     }
+    Shape::Vec(out)
 }
 
 #[cfg(test)]
@@ -94,20 +125,45 @@ mod tests {
 
     #[test]
     fn mesh_is_deterministic() {
-        assert_eq!(mesh_graph(7, 28), mesh_graph(7, 28));
+        assert_eq!(mesh_graph(SEED, NODES), mesh_graph(SEED, NODES));
     }
 
     #[test]
     fn mesh_nodes_in_unit_square() {
-        let (nodes, _) = mesh_graph(7, 28);
-        assert_eq!(nodes.len(), 28);
+        let (nodes, _) = mesh_graph(SEED, NODES);
+        assert_eq!(nodes.len(), NODES);
         assert!(nodes.iter().all(|p| (0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y)));
     }
 
     #[test]
+    fn cache_reuses_for_same_rect_and_palette() {
+        let mut cache = Cached::new();
+        let r = Rect::from_min_size(Pos2::ZERO, eframe::egui::vec2(800.0, 600.0));
+        let mut builds = 0;
+        for _ in 0..3 {
+            cache.get(r, palette::dark(), || {
+                builds += 1;
+                builds
+            });
+        }
+        assert_eq!(builds, 1);
+    }
+
+    #[test]
+    fn cache_rebuilds_on_rect_or_palette_change() {
+        let mut cache = Cached::new();
+        let r = Rect::from_min_size(Pos2::ZERO, eframe::egui::vec2(800.0, 600.0));
+        let r2 = Rect::from_min_size(Pos2::ZERO, eframe::egui::vec2(900.0, 600.0));
+        assert_eq!(cache.get(r, palette::dark(), || 1), 1);
+        assert_eq!(cache.get(r2, palette::dark(), || 2), 2);
+        assert_eq!(cache.get(r2, palette::light(), || 3), 3);
+        assert_eq!(cache.get(r2, palette::light(), || 4), 3);
+    }
+
+    #[test]
     fn mesh_edges_valid() {
-        let n = 28;
-        let (_, edges) = mesh_graph(7, n);
+        let n = NODES;
+        let (_, edges) = mesh_graph(SEED, n);
         let mut seen = std::collections::HashSet::new();
         let mut degree = vec![0; n];
         for &(a, b) in &edges {

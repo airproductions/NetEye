@@ -49,6 +49,14 @@ fn gauge(today: [u64; 2], cap_bytes: u64) -> Gauge {
     Gauge { down, up, level }
 }
 
+/// Identifies what the strip is showing; a change means the user picked another range or app.
+fn selection_key(range: usize, selected: Option<&str>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (range, selected).hash(&mut h);
+    h.finish()
+}
+
 /// Below this page width the strip drops the apps/connections section instead of squeezing it.
 fn strip_shows_counts(width: f32) -> bool {
     width >= 1180.0
@@ -63,6 +71,8 @@ pub struct TrafficPage {
     show_search: bool,
     /// (range, newest sample time, ctx time it arrived) for the live-graph glide.
     glide: Option<(usize, i64, f64)>,
+    /// Strip numbers, gauge and bars ease only right after a selection change; data ticks snap.
+    ease: motion::EaseGate,
 }
 
 struct Series {
@@ -178,6 +188,8 @@ impl TrafficPage {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons) {
+        // decided with the selection that `series` is built from, so the key and the data change in the same frame
+        let ease = self.ease.eases(selection_key(self.range, self.selected.as_deref()), ui.input(|i| i.time));
         let series = self.series(s);
         let full = ui.max_rect();
         let inner = full.shrink(GUTTER);
@@ -196,7 +208,7 @@ impl TrafficPage {
         let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink(18.0)));
         self.chart_area(&mut rui, s, icons, &series);
         let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
-        self.strip(&mut fui, s, &series, full.width());
+        self.strip(&mut fui, s, &series, full.width(), ease);
     }
 
     fn app_list(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons, series: &Series) {
@@ -403,7 +415,8 @@ impl TrafficPage {
                 let t = ((now - started) / motion::NORMAL as f64) as f32;
                 if t < 1.0 {
                     shift = chart.width() / (series.times.len() - 1) as f32 * (1.0 - motion::ease_out(t));
-                    ui.ctx().request_repaint();
+                    // capped at ~30 fps: the glide runs after every live sample, so full-rate frames would cost CPU
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
                 }
             }
         }
@@ -550,7 +563,7 @@ impl TrafficPage {
     }
 
     /// Bottom usage strip: download total, today gauge, upload total, then the Internet/LAN split.
-    fn strip(&self, ui: &mut egui::Ui, s: &Shared, series: &Series, page_w: f32) {
+    fn strip(&self, ui: &mut egui::Ui, s: &Shared, series: &Series, page_w: f32, ease: bool) {
         let r = ui.max_rect();
         let ctx = ui.ctx().clone();
         let id = ui.id().with("strip");
@@ -572,7 +585,7 @@ impl TrafficPage {
         let big = theme::bold(17.0);
         let small = theme::regular(12.0);
         let slot_w = motion::num_slot(ui, &big, "999.99 GB").max(motion::num_slot(ui, &small, "999.9 MB/s"));
-        let num = |key: &str, v: f64| motion::number(&ctx, id.with(key), v).max(0.0);
+        let num = |key: &str, v: f64| motion::number(&ctx, id.with(key), v, ease).max(0.0);
         let col = |p: &egui::Painter, x: f32, right: bool, bytes_v: f64, rate_v: f64, key: &str| {
             let (al, ax) = if right { (Align2::RIGHT_CENTER, x + slot_w) } else { (Align2::LEFT_CENTER, x) };
             p.text(Pos2::new(ax, cy - 9.0), al, theme::bytes(num(&format!("{key}b"), bytes_v) as u64), big.clone(), c::text());
@@ -594,8 +607,8 @@ impl TrafficPage {
         let gr = Rect::from_min_size(Pos2::new(x, cy - 35.0), Vec2::new(120.0, 70.0));
         let gc = Pos2::new(gr.center().x, gr.bottom() - 8.0);
         let rad = 52.0;
-        let gd = motion::value(&ctx, id.with("gd"), g.down).clamp(0.0, 1.0);
-        let gu = motion::value(&ctx, id.with("gu"), g.up).clamp(0.0, 1.0 - gd);
+        let gd = (motion::gated(&ctx, id.with("gd"), g.down as f64, ease) as f32).clamp(0.0, 1.0);
+        let gu = (motion::gated(&ctx, id.with("gu"), g.up as f64, ease) as f32).clamp(0.0, 1.0 - gd);
         let arc = |f0: f32, f1: f32| -> Vec<Pos2> {
             let n = ((f1 - f0).abs() * 48.0).ceil().max(1.0) as usize;
             (0..=n)
@@ -658,7 +671,7 @@ impl TrafficPage {
             p.text(Pos2::new(x + 22.0 + tot_w, y), Align2::RIGHT_CENTER, theme::bytes(t as u64), tot_font.clone(), c::text());
             let track = Rect::from_min_size(Pos2::new(bar_x, y - 4.0), Vec2::new(bar_w, 8.0));
             p.rect_filled(track, CornerRadius::same(4), c::raised());
-            let frac = motion::value(&ctx, id.with(("barfrac", i)), (sum(v) / maxv) as f32).clamp(0.0, 1.0);
+            let frac = (motion::gated(&ctx, id.with(("barfrac", i)), sum(v) / maxv, ease) as f32).clamp(0.0, 1.0);
             let fill_w = bar_w * frac;
             if fill_w >= 1.0 && sum(v) > 0.0 {
                 let wd = fill_w * (v[0] as f64 / sum(v)) as f32;
@@ -730,6 +743,28 @@ mod tests {
         let g = gauge([3_000, 1_000], 1_000);
         assert!((g.down + g.up - 1.0).abs() < 1e-4);
         assert_eq!(g.level, Level::Over);
+    }
+
+    #[test]
+    fn gauge_exactly_eighty_percent_is_normal() {
+        assert_eq!(gauge([400, 400], 1000).level, Level::Normal);
+    }
+
+    #[test]
+    fn gauge_exactly_cap_is_over() {
+        let g = gauge([600, 400], 1000);
+        assert_eq!(g.level, Level::Over);
+        assert!((g.down + g.up - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn selection_key_tracks_range_and_app() {
+        let base = selection_key(0, None);
+        assert_eq!(base, selection_key(0, None));
+        assert_ne!(base, selection_key(1, None));
+        assert_ne!(base, selection_key(0, Some("chrome.exe")));
+        assert_ne!(selection_key(0, Some("chrome.exe")), selection_key(0, Some("firefox.exe")));
+        assert_eq!(selection_key(2, Some("a")), selection_key(2, Some("a")));
     }
 
     #[test]
