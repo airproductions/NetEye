@@ -59,7 +59,7 @@
   - `theme::card` keeps its signature but goes back to the `2373ff6` flat look: `panel` fill, 1px `border`, radius 10, margin 16.
   - `theme::glow` becomes a no-op or is removed, with its callers updated.
 
-- [ ] **Step 1:** `git switch -c classic-graphite glasswire-feature-parity`, then add `sha2 = "0.10"` to `Cargo.toml`.
+- [ ] **Step 1:** On branch `classic-graphite` (already created from `glasswire-feature-parity`), add `sha2 = "0.10"` to `Cargo.toml`.
 - [ ] **Step 2: Write the failing tests** in `palette.rs`:
   - `dark_is_classic_graphite`: `dark().bg == rgb(0x14161b)`, `.panel == rgb(0x1a1d23)`, `.accent == rgb(0x5b8dff)`, `.down == rgb(0x2dd4bf)`.
   - `light_is_graphite_light`: `light().bg == rgb(0xf3f4f7)`, `.panel == rgb(0xffffff)`, `.accent == rgb(0x3b6fe0)`.
