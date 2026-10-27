@@ -1,6 +1,6 @@
 # Vantage "Traffic Insights" batch: design
 
-Date: 2026-10-27. Status: draft for approval.
+Date: 2026-10-27. Status: approved by the user (flags approved too).
 
 Builds on: branch `classic-graphite` (`311016e`), which has the classic layout, sorting, the app details popup and the other chat's features.
 
@@ -116,14 +116,14 @@ The user approved bundling the free DB-IP country database.
   - The README gets a matching "Third-party data" section.
 - There is no runtime download and no override file.
 
-### Flags (pending the user's answer)
+### Flags (approved by the user)
 
-The chip fallback (`theme::country_chip`, new) is built first in either case. Flags are a separate final task, done only if the user approves downloading flag-icons.
+The chip fallback is `ui::flags::chip`, and flags and chips live in the same `ui::flags` module.
 
 If approved:
 - Flags come from lipis/flag-icons (MIT, 4x3), rasterised once offline into one atlas PNG (`assets/flags/atlas.png`) with an index and `LICENSE`.
 - They are drawn with `painter.image` and a UV sub-rectangle, at 16×12 logical size.
-- Fallback: a 2-letter chip (`theme::country_chip`), used for `ZZ`, `LAN` (shown as a small network glyph), a missing code or a failed load.
+- Fallback: a 2-letter chip (`ui::flags::chip`), used for `ZZ`, `LAN` (shown as a small network glyph), a missing code or a failed load.
 
 If declined, chips are used everywhere.
 
@@ -183,7 +183,7 @@ If declined, chips are used everywhere.
 This covers old buckets, limited-mode buckets and the bucket that is open at upgrade time.
 
 - At read time only (never stored), compute the residual per bucket and app: `apps[k]` − Σ`flows[k]`, saturating.
-- The residual shows as a UI-only **"Not classified"** row under Traffic type and as Unknown under Countries, so group rows always add up to All traffic.
+- The residual shows as a UI-only **"Not classified"** row under both Traffic type and Countries (a UI-only `__unclassified` code, kept separate from genuinely unknown `ZZ` addresses), so group rows always add up to All traffic.
 - Network filter: with nothing selected, old buckets use the bucket's global `lan_down`/`lan_up`. With a selection, the per-app residual counts as WAN.
 
 ### Unknown codes
@@ -238,7 +238,7 @@ This covers old buckets, limited-mode buckets and the bucket that is open at upg
    - In exchange, saving moves off the lock and runs every 2 minutes.
 2. **Unattributed traffic.** It stays visible as "Other traffic (UDP, ICMP, system)" under type and Unknown under country. No new capture source.
 3. **Limited mode.**
-   - Group by Publishers/Type/Countries, LAN-only/WAN-only and the Usage view are shown disabled, with a "Needs administrator mode" note.
+   - Group by Publishers/Type/Countries and LAN-only/WAN-only are shown disabled, with a "Needs administrator mode" tooltip. The Usage view still opens, but shows the administrator note and restart button instead of columns.
    - Direction, markers, scale, pause and Mark all read work.
 4. **Graph units stay rates.** The "2 GB" in the screenshot comes from GlassWire's per-slice amounts. Vantage keeps rates, so the scale presets are rates.
 5. **Modes.** Graph | Usage | Bars. Today's Hosts mode is removed, and Bars is kept.
@@ -255,7 +255,7 @@ This covers old buckets, limited-mode buckets and the bucket that is open at upg
 
 ## Left to the builder
 
-- The compact JSON shape of `flows`, and the per-app host cap N (pick N to meet the about 6 MB budget; document it).
+- The compact JSON shape of `flows`, and the per-app host cap N. Pick N to meet the under-10 MB budget, and document it on the type.
 - How saving gets off the lock.
 - New modules to create: `src/ports.rs` (`ports::classify`) and `src/geo.rs`.
 - The port table contents: about 110 self-written entries, IANA as reference, no Nmap or Wireshark text.
