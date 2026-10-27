@@ -1,6 +1,6 @@
-<p align="center">
-  <img src="docs/assets/banner.svg" alt="NetEye: see every connection on your PC" width="100%">
-</p>
+
+https://github.com/user-attachments/assets/80b29544-a726-4d18-b2a0-048be85ef8b9
+
 
 <p align="center">
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-3d7bff?style=flat-square&logo=windows&logoColor=white">
