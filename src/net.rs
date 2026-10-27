@@ -491,11 +491,14 @@ pub fn file_icon(path: &str) -> Option<(usize, usize, Vec<u8>)> {
     }
 }
 
+/// Passed to the elevated copy so it waits for this one to exit instead of deferring to it.
+pub const RESTART_ARG: &str = "--restarted";
+
 /// Relaunch this executable elevated. Returns false if the user declined UAC.
 pub fn relaunch_as_admin() -> bool {
     let exe = std::env::current_exe().ok().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let (verb, file) = (wide("runas"), wide(&exe));
-    let r = unsafe { ShellExecuteW(null_mut(), verb.as_ptr(), file.as_ptr(), null(), null(), SW_SHOWNORMAL) };
+    let (verb, file, params) = (wide("runas"), wide(&exe), wide(RESTART_ARG));
+    let r = unsafe { ShellExecuteW(null_mut(), verb.as_ptr(), file.as_ptr(), params.as_ptr(), null(), SW_SHOWNORMAL) };
     r as isize > 32
 }
 

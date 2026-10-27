@@ -14,7 +14,7 @@ use crate::monitor::{Monitor, Shared, OTHER_KEY, SYSTEM_KEY};
 use crate::store::{AppRecord, Event};
 use crate::system::Dir;
 
-const SIZE: Vec2 = Vec2::new(360.0, 340.0);
+const SIZE: Vec2 = Vec2::new(470.0, 340.0);
 const PAD: f32 = 14.0;
 const BODY_H: f32 = 184.0;
 const MENU_W: f32 = 190.0;
@@ -29,6 +29,8 @@ pub enum Tab {
 enum Menu {
     Block,
     More,
+    /// The ⋯ button beside the path.
+    Path,
 }
 
 pub struct AppPopup {
@@ -269,11 +271,33 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
                     bui.spacing_mut().item_spacing.y = 0.0;
                     for (label, value) in rows {
                         let (rr, resp) = bui.allocate_exact_size(Vec2::new(inner_w, 20.0), Sense::hover());
+                        let is_path = label == "Path" && path.is_some();
+                        let value_w = inner_w - 118.0 - if is_path { 30.0 } else { 0.0 };
                         let p = bui.painter();
                         p.text(Pos2::new(rr.left(), rr.center().y), Align2::LEFT_CENTER, label, theme::regular(12.5), c::muted());
-                        theme::text(p, Pos2::new(rr.left() + 118.0, rr.center().y), &value, theme::regular(13.0), c::text(), inner_w - 118.0);
-                        if value.chars().count() > 30 {
-                            resp.on_hover_text(value);
+                        theme::text(p, Pos2::new(rr.left() + 118.0, rr.center().y), &value, theme::regular(13.0), c::text(), value_w);
+                        if value.chars().count() > 40 {
+                            resp.on_hover_text(value.clone());
+                        }
+                        if is_path {
+                            // ⋯ in a circle: Copy Path / Open File Location
+                            let br = Rect::from_center_size(Pos2::new(rr.right() - 11.0, rr.center().y), Vec2::splat(20.0));
+                            let bresp = bui.interact(br, Id::new("app_popup_path_menu"), Sense::click());
+                            let open = matches!(menu, Some((Menu::Path, _)));
+                            let lit = open || bresp.hovered();
+                            let ink = if lit { c::text() } else { c::muted() };
+                            let p = bui.painter();
+                            if lit {
+                                p.circle_filled(br.center(), 9.5, c::hover());
+                            }
+                            p.circle_stroke(br.center(), 9.0, Stroke::new(1.2_f32, ink));
+                            for dx in [-4.0, 0.0, 4.0] {
+                                p.circle_filled(br.center() + Vec2::new(dx, 0.0), 1.3, ink);
+                            }
+                            if bresp.clicked() {
+                                *menu = if open { None } else { Some((Menu::Path, br)) };
+                            }
+                            bresp.on_hover_text("Path options");
                         }
                     }
                 } else if alerts.is_empty() {
@@ -321,6 +345,7 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
 
     // footer menu
     let mut menu_layer = None;
+    let mut copied = false;
     if let Some((m, anchor)) = pop.menu {
         let mut close = false;
         let items: Vec<(&str, bool, bool, Option<&str>)> = match m {
@@ -335,11 +360,18 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
                 let tip = path.is_none().then_some("No file path for this app");
                 vec![("Open file location", false, path.is_some(), tip), ("Copy path", false, path.is_some(), tip)]
             }
+            Menu::Path => vec![("Copy Path", false, true, None), ("Open File Location", false, true, None)],
+        };
+        // the path menu drops below its ⋯ button; footer menus open upwards
+        let (at, pivot) = if m == Menu::Path {
+            (anchor.right_bottom() + Vec2::new(0.0, 4.0), Align2::RIGHT_TOP)
+        } else {
+            (anchor.left_top() - Vec2::new(0.0, 4.0), Align2::LEFT_BOTTOM)
         };
         let ar = egui::Area::new(Id::new("app_popup_menu"))
             .order(Order::Tooltip)
-            .fixed_pos(anchor.left_top() - Vec2::new(0.0, 4.0))
-            .pivot(Align2::LEFT_BOTTOM)
+            .fixed_pos(at)
+            .pivot(pivot)
             .fade_in(false)
             .show(ctx, |ui| {
                 egui::Frame::NONE
@@ -372,14 +404,15 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
                                             actions.push(Action::Block(key.clone(), dir, block));
                                         }
                                     }
-                                    (Menu::More, 0) => {
+                                    (Menu::More, 0) | (Menu::Path, 1) => {
                                         if let Some(p) = &path {
                                             let _ = std::process::Command::new("explorer.exe").raw_arg(format!("/select,\"{p}\"")).spawn();
                                         }
                                     }
-                                    (Menu::More, _) => {
+                                    (Menu::More, _) | (Menu::Path, _) => {
                                         if let Some(p) = &path {
                                             ctx.copy_text(p.clone());
+                                            copied = true;
                                         }
                                     }
                                 }
@@ -391,6 +424,9 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
         if close {
             pop.menu = None;
         }
+    }
+    if copied {
+        s.toast = Some("Path copied".into());
     }
 
     if vt_click {

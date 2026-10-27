@@ -19,7 +19,9 @@ fn main() -> eframe::Result {
         let _store = store::Store::load(); // initialises the diagnostics log
         std::process::exit(system::run_firewall_batch(&args[2]));
     }
-    if !single_instance() {
+    // after "Restart as administrator" the old copy may still hold the mutex for a moment
+    let restarting = args.iter().any(|a| a == net::RESTART_ARG);
+    if !single_instance(restarting) {
         return Ok(());
     }
     let icon = egui::IconData { rgba: ui::theme::logo_rgba(64), width: 64, height: 64 };
@@ -35,16 +37,26 @@ fn main() -> eframe::Result {
 }
 
 /// Returns false (after focusing the running window) when Vantage is already running.
-fn single_instance() -> bool {
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+/// With `wait`, first gives the previous copy up to 10 s to exit (elevated restart).
+fn single_instance(wait: bool) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW};
     let name = net::wide(r"Local\VantageNetworkMonitor");
     unsafe {
         // Leaked on purpose: the mutex must live as long as the process.
-        let _mutex = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
-        if GetLastError() != ERROR_ALREADY_EXISTS {
-            return true;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let mutex = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+            if GetLastError() != ERROR_ALREADY_EXISTS {
+                return true;
+            }
+            if !wait || std::time::Instant::now() >= deadline {
+                break;
+            }
+            // let go of the old copy's mutex so it disappears when that copy exits, then retry
+            CloseHandle(mutex);
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
         let title = net::wide("Vantage");
         let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
