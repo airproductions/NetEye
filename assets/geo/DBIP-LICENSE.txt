@@ -1,0 +1,14 @@
+IP Geolocation by DB-IP
+https://db-ip.com
+
+File: dbip-country-lite-2026-10.mmdb (DB-IP "IP to Country Lite", October 2026 release)
+
+This database is published by DB-IP under the Creative Commons Attribution 4.0
+International license (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+Vantage bundles the file exactly as downloaded from DB-IP, only decompressed from
+its .gz archive. The data itself is unmodified. Vantage reads only the ISO country
+code of each record, and credits DB-IP in its user interface and README.
+
+DB-IP provides the data "as is", without warranties of any kind.
