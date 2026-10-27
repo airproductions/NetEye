@@ -29,6 +29,9 @@ pub struct LiveSample {
     pub down: u64,
     pub up: u64,
     pub apps: Vec<(String, [u64; 2])>,
+    /// This second's flows per app; filled for the newest samples only (Task 5).
+    #[allow(dead_code)] // consumed by Task 6; removed in Task 11
+    pub flows: Vec<(String, store::Flow)>,
 }
 
 #[derive(Clone, Debug)]
@@ -188,8 +191,12 @@ impl Monitor {
         self.shared.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Clones the store under the lock, then writes it after the lock is released.
     pub fn save(&self) {
-        self.lock().store.save();
+        let snap = self.lock().store.snapshot();
+        if let Some((dir, gen, data)) = snap {
+            Store::write_snapshot(&dir, gen, &data);
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -874,11 +881,11 @@ impl Monitor {
 
                 let mut sample_apps: Vec<(String, [u64; 2])> = per_app.iter().map(|(k, v)| (k.clone(), *v)).collect();
                 sample_apps.sort_by_key(|(_, v)| std::cmp::Reverse(v[0] + v[1]));
-                s.live.push_back(LiveSample { t, down: total_down, up: total_up, apps: sample_apps });
+                s.live.push_back(LiveSample { t, down: total_down, up: total_up, apps: sample_apps, flows: Vec::new() });
                 while s.live.len() > LIVE_SECONDS {
                     s.live.pop_front();
                 }
-                s.store.add_usage(t, [total_down, total_up, lan[0], lan[1]], &per_app, &per_host);
+                s.store.add_usage(t, [total_down, total_up, lan[0], lan[1]], &per_app, &per_host, &HashMap::new());
                 let cap = s.store.data.settings.daily_cap_mb * 1_000_000;
                 let (used, period) = s.store.plan_usage();
                 if cap > 0 && used >= cap && s.store.data.cap_alerted.as_deref() != Some(&period) {
