@@ -57,6 +57,14 @@ Also: light and dark themes, a tray icon that stays out of the way, sortable tab
 
 ## Getting started
 
+### Install
+
+Download **NetEye-Setup-x.y.z.exe** from [Releases](https://github.com/airproductions/NetEye/releases) and run it (Windows 10 or 11, 64-bit). A portable zip is there too.
+
+The installer isn't code-signed yet, so Windows SmartScreen may say it "protected your PC": click **More info → Run anyway**. Uninstalling removes every firewall rule NetEye added and asks whether to keep your history.
+
+Linux and macOS versions are planned; see [docs/plans/cross-platform.md](docs/plans/cross-platform.md).
+
 ### Run
 
 NetEye works without admin rights, but **run it as administrator** for the full picture:
@@ -80,6 +88,8 @@ cargo build --release
 ```
 
 The app is written to `target/release/neteye.exe`.
+
+To build the installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php) and run `iscc installer\neteye.iss`; it writes `dist\NetEye-Setup-1.0.0.exe`. Pushing a tag like `v1.0.1` makes GitHub Actions build, test and publish both the installer and a portable zip.
 
 ## Privacy
 
