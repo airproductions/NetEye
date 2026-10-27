@@ -230,6 +230,8 @@ pub enum Glyph {
     Refresh,
     Check,
     Lock,
+    Pause,
+    Play,
 }
 
 pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
@@ -375,6 +377,14 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
         Glyph::Lock => {
             p.rect_stroke(Rect::from_min_max(pt(4.5, 9.0), pt(15.5, 17.5)), CornerRadius::same(2), s, StrokeKind::Middle);
             p.add(Shape::line(arc(pt(10.0, 9.0), 3.6 * u, -3.1416, 0.0), s));
+        }
+        Glyph::Pause => {
+            for x in [6.5, 13.5] {
+                p.rect_filled(Rect::from_min_max(pt(x - 1.6, 4.0), pt(x + 1.6, 16.0)), CornerRadius::same(1), color);
+            }
+        }
+        Glyph::Play => {
+            p.add(Shape::convex_polygon(vec![pt(6.0, 4.0), pt(16.0, 10.0), pt(6.0, 16.0)], color, Stroke::NONE));
         }
     }
 }
@@ -863,4 +873,44 @@ mod tests {
         assert_eq!(f.families[&FontFamily::Proportional][0], "manrope");
         assert_eq!(f.families[&FontFamily::Name("bold".into())][0], "manrope-b");
     }
+}
+
+// TEMP(task7): replaced on merge
+/// Compact header button that opens a popup list; returns the picked index.
+pub fn menu(ui: &mut Ui, id: &str, label: &str, items: &[&str], selected: usize, disabled: &[bool], disabled_tip: &str) -> Option<usize> {
+    let font = semibold(12.5);
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font, c::text());
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 34.0, 24.0), Sense::click());
+    let t = motion::hover(ui, resp.id, resp.hovered());
+    ui.painter().rect_filled(r, CornerRadius::same(6), lerp_color(c::raised(), c::hover(), t));
+    ui.painter().galley(Pos2::new(r.left() + 10.0, r.center().y - galley.size().y / 2.0), galley, c::text());
+    glyph(ui.painter(), Rect::from_center_size(Pos2::new(r.right() - 13.0, r.center().y), Vec2::splat(12.0)), Glyph::ChevronDown, c::muted());
+    let popup = ui.make_persistent_id(id);
+    if resp.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup));
+    }
+    let mut picked = None;
+    egui::popup::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+        ui.set_min_width(140.0);
+        for (i, item) in items.iter().enumerate() {
+            let off = disabled.get(i).copied().unwrap_or(false);
+            let (row, rr) = ui.allocate_exact_size(Vec2::new(ui.available_width().max(140.0), 26.0), if off { Sense::hover() } else { Sense::click() });
+            if rr.hovered() && !off {
+                ui.painter().rect_filled(row, CornerRadius::same(4), c::hover());
+            }
+            if i == selected {
+                let m = Pos2::new(row.left() + 11.0, row.center().y);
+                ui.painter().add(Shape::line(vec![m + Vec2::new(-4.0, 0.0), m + Vec2::new(-1.0, 3.0), m + Vec2::new(4.0, -3.5)], Stroke::new(1.6_f32, c::accent())));
+            }
+            let col = if off { c::faint() } else { c::text() };
+            ui.painter().text(Pos2::new(row.left() + 24.0, row.center().y), Align2::LEFT_CENTER, *item, regular(13.0), col);
+            if off {
+                rr.on_hover_text(disabled_tip);
+            } else if rr.clicked() {
+                picked = Some(i);
+                ui.memory_mut(|m| m.close_popup());
+            }
+        }
+    });
+    picked
 }

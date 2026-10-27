@@ -12,6 +12,11 @@ use super::Action;
 use crate::monitor::{Shared, OTHER_KEY};
 use crate::store::{self, HOUR, MINUTE};
 
+// Task 9: graph markers, scale, scrubber and pause read the cached aggregate.
+use std::sync::Arc;
+use super::markers;
+use super::traffic_data::{self as td, Agg, AggCache, Query, Sel, Span};
+
 const RANGES: [&str; 5] = ["5 Minutes", "3 Hours", "24 Hours", "Week", "Month"];
 const RANGE_CODES: [&str; 5] = ["5m", "3h", "24h", "7d", "30d"];
 const ROW_H: f32 = 32.0;
@@ -105,7 +110,22 @@ pub struct TrafficPage {
     glide: Option<(usize, i64, f64)>,
     /// Strip numbers, gauge and bars ease only right after a selection change; data ticks snap.
     ease: motion::EaseGate,
+    /// Graph aggregate for the current query (Task 9).
+    graph_cache: AggCache,
+    /// Timeline scrubber: steps back from now; 0 = live.
+    end_offset: usize,
+    /// Paused graph: the snapshot drawn instead of the live aggregate.
+    paused: Option<Arc<Agg>>,
+    /// Last frame's query, to reset the offset on a span change and resume on any change.
+    last_query: Option<Query>,
 }
+
+/// Marker lane under the plot.
+const LANE_H: f32 = 18.0;
+/// Timeline scrubber strip under the graph and Bars views.
+const SCRUB_H: f32 = 26.0;
+/// Scrubber: room on its right for the Live label / Now chip.
+const SCRUB_TAIL: f32 = 60.0;
 
 struct Series {
     times: Vec<i64>,
@@ -401,16 +421,26 @@ impl TrafficPage {
             theme::label(&mut tui, "All apps", theme::semibold(16.0), c::text());
         }
 
-        let chart = Rect::from_min_max(Pos2::new(r.left(), r.top() + 90.0), Pos2::new(r.right(), r.bottom() - 28.0));
+        // the timeline scrubber sits under the graph and Bars views (Preset spans only)
+        let scrub = self.mode < 2;
+        let bottom = if scrub { r.bottom() - SCRUB_H - 30.0 } else { r.bottom() - 28.0 };
+        let chart = Rect::from_min_max(Pos2::new(r.left(), r.top() + 90.0), Pos2::new(r.right(), bottom));
+        let live = self.graph_agg(s);
         match self.mode {
-            0 => self.graph(ui, s, chart, series),
+            0 => {
+                let view = self.paused.clone().unwrap_or_else(|| live.clone());
+                self.graph(ui, s, chart, &view)
+            }
             1 => self.bars(ui, chart, series),
             _ => self.hosts(ui, s, chart, series),
         }
+        if scrub {
+            self.scrubber(ui, Rect::from_min_max(Pos2::new(r.left(), r.bottom() - SCRUB_H), r.max), &live);
+        }
     }
 
-    fn time_axis(&self, p: &egui::Painter, chart: Rect, series: &Series) {
-        let n = series.times.len();
+    fn time_axis(&self, p: &egui::Painter, chart: Rect, times: &[i64]) {
+        let n = times.len();
         if n < 2 {
             return;
         }
@@ -418,7 +448,7 @@ impl TrafficPage {
         for i in 0..=ticks {
             let idx = (n - 1) * i / ticks;
             let x = chart.left() + chart.width() * idx as f32 / (n - 1) as f32;
-            let t = series.times[idx];
+            let t = times[idx];
             let label = match self.range {
                 0 => theme::local(t).format("%-I:%M:%S").to_string(),
                 1 | 2 => theme::clock(t),
@@ -430,28 +460,84 @@ impl TrafficPage {
         }
     }
 
-    fn graph(&mut self, ui: &mut egui::Ui, s: &mut Shared, chart: Rect, series: &Series) {
-        let step = series.step as f64;
-        let down: Vec<f64> = series.down.iter().map(|v| v / step).collect();
-        let up: Vec<f64> = series.up.iter().map(|v| v / step).collect();
+    /// The graph's query: the current range and app, plus the scrubber offset. A span change
+    /// returns to now, and any change of what's viewed resumes a paused graph.
+    fn graph_agg(&mut self, s: &Shared) -> Arc<Agg> {
+        let now = s.live.back().map(|l| l.t).unwrap_or_else(store::now);
+        let mut q = Query {
+            span: Span::Preset(self.range.min(4) as u8),
+            group: td::Group::Apps,
+            net: td::Net::All,
+            dir: td::DirF::Both,
+            sel: self.selected.clone().map_or(Sel::All, Sel::App),
+            admin: s.admin,
+            end_offset: self.end_offset,
+        };
+        if let Some(old) = &self.last_query {
+            if old.span != q.span {
+                self.end_offset = 0;
+                q.end_offset = 0;
+            }
+            self.paused = markers::next_pause(self.paused.take(), old, &q);
+        }
+        self.last_query = Some(q.clone());
+        let key = td::cache_key(&q, &s.store.data, &s.live, now);
+        self.graph_cache.get(key, || td::aggregate(&s.store.data, &s.live, &q, now))
+    }
+
+    /// The saved scale preset for a range.
+    fn scale_slot(st: &mut store::Settings, range: usize) -> &mut u8 {
+        match range {
+            0 => &mut st.graph_scale_5m,
+            1 => &mut st.graph_scale_3h,
+            2 => &mut st.graph_scale_24h,
+            3 => &mut st.graph_scale_7d,
+            _ => &mut st.graph_scale_30d,
+        }
+    }
+
+    /// Small rounded label button for the graph overlays.
+    fn chip(ui: &mut egui::Ui, text: &str, color: Color32, tip: &str) -> egui::Response {
+        let font = theme::semibold(12.0);
+        let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 18.0, 22.0), Sense::click());
+        let fill = if resp.hovered() { c::hover() } else { c::raised() };
+        ui.painter().rect_filled(r, CornerRadius::same(11), fill);
+        ui.painter().galley(Pos2::new(r.left() + 9.0, r.center().y - galley.size().y / 2.0), galley, color);
+        resp.on_hover_text(tip)
+    }
+
+    fn graph(&mut self, ui: &mut egui::Ui, s: &mut Shared, chart: Rect, agg: &Arc<Agg>) {
+        let paused = self.paused.is_some();
+        let step = agg.step.max(1) as f64;
+        let down: Vec<f64> = agg.down.iter().map(|v| v / step).collect();
+        let up: Vec<f64> = agg.up.iter().map(|v| v / step).collect();
         let max = down.iter().chain(up.iter()).cloned().fold(0.0, f64::max);
+        // the marker lane sits under the plot; the time axis goes under the lane
+        let plot = Rect::from_min_max(chart.min, Pos2::new(chart.right(), chart.bottom() - LANE_H));
+        let lane = Rect::from_min_max(Pos2::new(chart.left(), plot.bottom()), chart.max);
         let p = ui.painter_at(chart.expand(30.0));
+        let scale_ix = *Self::scale_slot(&mut s.store.data.settings, self.range);
+        let fixed = markers::scale_max(scale_ix);
         if max <= 0.0 {
-            theme::empty_state(&p, chart.center(), "No traffic in this period. Try another time range.");
-            self.time_axis(&p, chart, series);
+            theme::empty_state(&p, plot.center(), "No traffic in this period. Try another time range.");
+            self.time_axis(&p, chart, &agg.times);
+            self.draw_markers(ui, s, lane, agg, 0.0);
+            self.graph_controls(ui, s, plot, agg, false);
             return;
         }
-        let nice = theme::nice_max(max);
+        let nice = fixed.unwrap_or_else(|| theme::nice_max(max));
         for i in 1..=4 {
-            let y = chart.bottom() - chart.height() * i as f32 / 4.0;
-            p.line_segment([Pos2::new(chart.left(), y), Pos2::new(chart.right(), y)], Stroke::new(1.0_f32, c::border()));
-            p.text(Pos2::new(chart.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::rate(nice * i as f64 / 4.0), theme::regular(11.5), c::faint());
+            let y = plot.bottom() - plot.height() * i as f32 / 4.0;
+            p.line_segment([Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)], Stroke::new(1.0_f32, c::border()));
+            p.text(Pos2::new(plot.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::rate(nice * i as f64 / 4.0), theme::regular(11.5), c::faint());
         }
-        p.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, c::border()));
-        // a new live sample slides the series in from the left over NORMAL
+        p.line_segment([plot.left_bottom(), plot.right_bottom()], Stroke::new(1.0_f32, c::border()));
+        // a new live sample slides the series in from the left over NORMAL; not while paused or
+        // looking back, and not once the newest sample is stale (e.g. after hiding to the tray)
         let mut shift = 0.0;
-        if self.range == 0 && series.times.len() > 1 {
-            let newest = *series.times.last().unwrap();
+        if self.range == 0 && agg.times.len() > 1 && !paused && self.end_offset == 0 {
+            let newest = *agg.times.last().unwrap();
             let now = ui.input(|i| i.time);
             match self.glide {
                 Some((r, t, _)) if r == self.range && t == newest => {}
@@ -460,34 +546,39 @@ impl TrafficPage {
             }
             if let Some((_, _, started)) = self.glide {
                 let t = ((now - started) / motion::NORMAL as f64) as f32;
+                let age = (store::now() - newest) as f64;
                 if t < 1.0 {
-                    shift = chart.width() / (series.times.len() - 1) as f32 * (1.0 - motion::ease_out(t));
                     // capped at ~30 fps: the glide runs after every live sample, so full-rate frames would cost CPU
-                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+                    if let Some(frame) = markers::glide_repaint(paused, age) {
+                        shift = plot.width() / (agg.times.len() - 1) as f32 * (1.0 - motion::ease_out(t));
+                        ui.ctx().request_repaint_after(frame);
+                    }
                 }
             }
+        } else {
+            self.glide = None;
         }
-        let sp = ui.painter_at(chart);
-        let moved = chart.translate(Vec2::new(shift, 0.0));
+        let sp = ui.painter_at(plot);
+        let moved = plot.translate(Vec2::new(shift, 0.0));
         theme::area(&sp, moved, &down, nice, c::down());
         theme::area(&sp, moved, &up, nice, c::up());
-        self.time_axis(&p, chart, series);
+        self.time_axis(&p, chart, &agg.times);
+        self.draw_markers(ui, s, lane, agg, shift);
 
-        let resp = ui.interact(chart, ui.id().with("graph"), Sense::hover());
+        let resp = ui.interact(plot, ui.id().with("graph"), Sense::hover());
         if let Some(pos) = resp.hover_pos() {
-            let n = series.times.len();
-            let idx = (((pos.x - chart.left()) / chart.width()) * (n - 1) as f32).round().clamp(0.0, (n - 1) as f32) as usize;
-            let x = chart.left() + chart.width() * idx as f32 / (n - 1) as f32;
-            p.line_segment([Pos2::new(x, chart.top()), Pos2::new(x, chart.bottom())], Stroke::new(1.0_f32, c::muted()));
+            let n = agg.times.len();
+            let idx = (((pos.x - plot.left()) / plot.width()) * (n - 1) as f32).round().clamp(0.0, (n - 1) as f32) as usize;
+            let x = plot.left() + plot.width() * idx as f32 / (n - 1) as f32;
+            p.line_segment([Pos2::new(x, plot.top()), Pos2::new(x, plot.bottom())], Stroke::new(1.0_f32, c::muted()));
             for (vals, col) in [(&down, c::down()), (&up, c::up())] {
-                let y = chart.bottom() - (vals[idx] / nice).clamp(0.0, 1.0) as f32 * chart.height();
+                let y = plot.bottom() - (vals[idx] / nice).clamp(0.0, 1.0) as f32 * plot.height();
                 p.circle(Pos2::new(x, y), 4.0, col, Stroke::new(2.0_f32, c::bg()));
             }
-            let t = series.times[idx];
-            let apps = series.apps[idx].clone();
+            let t = agg.times[idx];
             let (d, u) = (down[idx], up[idx]);
             let range = self.range;
-            let names: Vec<(String, [u64; 2])> = apps.iter().take(4).map(|(k, v)| (s.app_name(k), *v)).collect();
+            let names: Vec<(String, [u64; 2])> = agg.step_top.get(idx).map(|v| v.iter().take(4).map(|(k, v)| (s.app_name(k), *v)).collect()).unwrap_or_default();
             let filtered = self.selected.is_some();
             egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("tip"), |ui| {
                 let when = if range == 0 { theme::local(t).format("%-I:%M:%S %p").to_string() } else if range <= 2 { theme::clock(t) } else { theme::local(t).format("%a %-d %b, %-I %p").to_string() };
@@ -506,6 +597,147 @@ impl TrafficPage {
                     }
                 }
             });
+        }
+        self.graph_controls(ui, s, plot, agg, fixed.is_some() && max > nice);
+    }
+
+    /// Plot overlays: the scale menu (top-left, with the clipped note) and the pause button with
+    /// its chip (top-right). Drawn after the plot so they take the pointer first.
+    fn graph_controls(&mut self, ui: &mut egui::Ui, s: &mut Shared, plot: Rect, agg: &Arc<Agg>, clipped: bool) {
+        let bar = Rect::from_min_size(plot.min + Vec2::new(4.0, 4.0), Vec2::new((plot.width() - 8.0).max(0.0), 24.0));
+        let mut left = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let labels: Vec<String> = markers::SCALE_PRESETS.iter().map(|v| if *v > 0.0 { theme::rate(*v) } else { "Auto".to_string() }).collect();
+        let items: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let slot = Self::scale_slot(&mut s.store.data.settings, self.range);
+        let cur = usize::from(*slot).min(items.len() - 1);
+        if let Some(i) = theme::menu(&mut left, "graph-scale", items[cur], &items, cur, &[], "") {
+            if i != cur {
+                *slot = i as u8;
+                s.store.mark_dirty();
+            }
+        }
+        if clipped {
+            left.add_space(8.0);
+            theme::label(&mut left, "▲ clipped", theme::semibold(11.5), c::warn()).on_hover_text("Traffic is above the chosen scale");
+        }
+        let mut right = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        let paused = self.paused.is_some();
+        let (g, tip) = if paused { (Glyph::Play, "Resume the graph") } else { (Glyph::Pause, "Pause the graph") };
+        if theme::icon_button(&mut right, g, 24.0, tip).clicked() {
+            self.paused = if paused { None } else { Some(agg.clone()) };
+        }
+        if paused {
+            right.add_space(4.0);
+            if Self::chip(&mut right, "Paused", c::warn(), "The graph is frozen; click to resume").clicked() {
+                self.paused = None;
+            }
+        }
+    }
+
+    /// Clock markers for Important events in the lane under the plot; neighbours closer than
+    /// 14 px merge, with a count badge. Hover lists up to 5 events.
+    fn draw_markers(&self, ui: &mut egui::Ui, s: &Shared, lane: Rect, agg: &Agg, shift: f32) {
+        let (Some(&t0), Some(&t1)) = (agg.times.first(), agg.times.last()) else { return };
+        let step = agg.step.max(1);
+        let sel = self.selected.clone().map_or(Sel::All, Sel::App);
+        let data = &s.store.data;
+        let picked = markers::pick_events(&data.events, &sel, |k| data.apps.get(k).and_then(|r| r.publisher.clone()));
+        if picked.is_empty() {
+            return;
+        }
+        // events sit on their step's start, the same x the series uses for that step
+        let pts: Vec<(i64, u64)> = picked.iter().map(|e| (e.t - (e.t - t0).rem_euclid(step), e.id)).collect();
+        let p = ui.painter_at(lane);
+        let cy = lane.center().y;
+        for cl in markers::clusters(&pts, t0, t1, lane.left() + shift, lane.width(), markers::MIN_GAP) {
+            let r = Rect::from_center_size(Pos2::new(cl.x, cy), Vec2::splat(13.0));
+            theme::glyph(&p, r, Glyph::Clock, c::accent());
+            let n = cl.events.len();
+            if n > 1 {
+                let bc = Pos2::new(r.right() + 1.0, r.top() + 1.0);
+                p.circle_filled(bc, 6.0, c::accent());
+                p.text(bc, Align2::CENTER_CENTER, if n > 9 { "9+".to_string() } else { n.to_string() }, theme::bold(8.5), Color32::WHITE);
+            }
+            let Some(first) = cl.events.first() else { continue };
+            let resp = ui.interact(r.expand(3.0).intersect(lane), ui.id().with(("marker", *first)), Sense::hover());
+            if resp.hovered() {
+                let range = self.range;
+                let lines: Vec<(String, String)> = cl
+                    .events
+                    .iter()
+                    .rev()
+                    .take(5)
+                    .filter_map(|id| picked.iter().find(|e| e.id == *id))
+                    .map(|e| {
+                        let when = if range == 0 { theme::local(e.t).format("%-I:%M:%S %p").to_string() } else if range <= 2 { theme::clock(e.t) } else { theme::date_time(e.t) };
+                        let app = e.app.as_deref().map(|k| s.app_name(k)).unwrap_or_default();
+                        (when, super::log::event_text(e, &app))
+                    })
+                    .collect();
+                let more = n.saturating_sub(5);
+                resp.on_hover_ui(|ui| {
+                    ui.set_max_width(360.0);
+                    for (when, msg) in lines {
+                        theme::label(ui, when, theme::semibold(12.5), c::muted());
+                        theme::label(ui, msg, theme::regular(13.0), c::text());
+                    }
+                    if more > 0 {
+                        theme::label(ui, format!("and {more} more"), theme::regular(12.5), c::muted());
+                    }
+                });
+            }
+        }
+    }
+
+    /// Timeline scrubber: a faint mini chart of the whole stored history with a handle at the end
+    /// of the visible window. Dragging pans back in time; the Now chip returns to live.
+    fn scrubber(&mut self, ui: &mut egui::Ui, rect: Rect, agg: &Agg) {
+        let bar = Rect::from_min_max(rect.min, Pos2::new(rect.right() - SCRUB_TAIL, rect.bottom()));
+        let p = ui.painter_at(rect);
+        p.rect_filled(bar, CornerRadius::same(4), c::panel());
+        let window = agg.times.len();
+        let max_offset = agg.max_offset;
+        let h = &agg.history;
+        if h.len() >= 2 && bar.width() > 4.0 {
+            // one value per ~2 px (the peak of each bin), so long histories stay cheap to draw
+            let bins = ((bar.width() / 2.0) as usize).clamp(2, h.len());
+            let vals: Vec<f64> = (0..bins).map(|b| h[b * h.len() / bins..((b + 1) * h.len() / bins).max(b * h.len() / bins + 1)].iter().map(|x| x.1).fold(0.0, f64::max)).collect();
+            let peak = vals.iter().cloned().fold(0.0, f64::max);
+            theme::area(&p, bar.shrink2(Vec2::new(0.0, 3.0)), &vals, peak, c::faint());
+            let fmt = |t: i64| match self.range {
+                0 => theme::local(t).format("%-I:%M:%S").to_string(),
+                1 | 2 => theme::clock(t),
+                _ => theme::local(t).format("%-d %b").to_string(),
+            };
+            p.text(Pos2::new(bar.left() + 6.0, bar.center().y), Align2::LEFT_CENTER, fmt(h[0].0), theme::regular(10.5), c::muted());
+            p.text(Pos2::new(bar.right() - 6.0, bar.center().y), Align2::RIGHT_CENTER, fmt(h[h.len() - 1].0), theme::regular(10.5), c::muted());
+        }
+        // the visible window and its end handle
+        let off = self.end_offset.min(max_offset);
+        let hx = markers::x_from_offset(off, bar, max_offset, window);
+        let total = (max_offset + window).max(1) as f32;
+        let wx = (hx - bar.width() * window as f32 / total).max(bar.left());
+        p.rect_filled(Rect::from_min_max(Pos2::new(wx, bar.top()), Pos2::new(hx, bar.bottom())), CornerRadius::ZERO, theme::with_alpha(c::accent(), 28));
+        p.line_segment([Pos2::new(hx, bar.top()), Pos2::new(hx, bar.bottom())], Stroke::new(2.0_f32, c::accent()));
+        p.rect_filled(Rect::from_center_size(Pos2::new(hx, bar.center().y), Vec2::new(6.0, 14.0)), CornerRadius::same(3), c::accent());
+
+        let resp = ui.interact(bar, ui.id().with("scrubber"), Sense::click_and_drag());
+        if max_offset > 0 {
+            let resp = resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text("Drag to look back in time");
+            if resp.clicked() || resp.dragged() {
+                if let Some(pos) = resp.interact_pointer_pos() {
+                    self.end_offset = markers::offset_from_x(pos.x, bar, max_offset, window);
+                }
+            }
+        }
+        let tail = Rect::from_min_max(Pos2::new(bar.right() + 8.0, rect.top()), rect.max);
+        let mut tui = ui.new_child(egui::UiBuilder::new().max_rect(tail).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        if self.end_offset > 0 {
+            if Self::chip(&mut tui, "Now", c::accent(), "Back to live").clicked() {
+                self.end_offset = 0;
+            }
+        } else {
+            theme::label(&mut tui, "Live", theme::semibold(12.0), c::muted());
         }
     }
 
