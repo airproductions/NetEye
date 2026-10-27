@@ -276,3 +276,17 @@ This covers old buckets, limited-mode buckets and the bucket that is open at upg
    - **Changing range** returns to now.
    - The handle position is part of the query as `end_offset` (in steps), so the aggregation cache keys on it.
 6. **Data-alert bell on the gauge.** A small bell-plus icon above the gauge total. Clicking it opens Settings at the data plan section, so the user can set or change the limit. Its tooltip is "Set a data alert".
+
+## Additions from the user's third message (approved: "add it please")
+
+7. **Time menu.** The range dropdown has three sections, separated by divider lines:
+   - **Presets:** 5 Minutes, 3 Hours, 24 Hours, Last 7 Days, Last 30 Days.
+   - **Calendar periods:** Day, Week and Month, each with a calendar icon, plus All Time.
+     - Picking Day, Week or Month shows a compact period stepper in the chart header: `◀ Mon 26 Oct ▶` (or `◀ Week of 19 Oct ▶`, `◀ October 2026 ▶`). The stepper moves through periods that have stored data, and it starts at the current period.
+     - All Time covers all stored hour buckets.
+   - **Custom:** shows `From ◀ date ▶  To ◀ date ▶` day steppers, limited to the stored history.
+   - A period of 24 hours or less that still lies within minute retention uses minute buckets; everything else uses hour buckets.
+   - Per-app history only goes back as far as the hour buckets (32 days of running time). Periods older than that show the empty state. *(Claude's call: retention is unchanged.)*
+   - Built from `theme::menu` plus steppers. No calendar-widget crate.
+8. **App list shows speeds, not connections.** "Connected now" rows show each app's current ↓ and ↑ speed (from the live rate) in the two number columns, instead of "N conns". The connection count moves to the row tooltip. In limited mode, where there are no per-app bytes, the cells show "—".
+9. **Filters above the app list.** This is already in the design (Group by / Network / Direction). It is confirmed as the user's request.

@@ -314,7 +314,10 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - `#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]` on each of `pub enum Group { Apps, Publishers, Types, Countries }`, `pub enum Net { All, Lan, Wan }` and `pub enum DirF { Both, In, Out }`. Each has `from_u8`/`to_u8`; out-of-range values map to the first variant.
   - `pub fn effective(group: Group, net: Net, admin: bool) -> (Group, Net)`: not admin gives `(Apps, All)`.
   - `#[derive(Clone, PartialEq, Eq, Hash, Debug)] pub enum Sel { All, App(String), Group(Group, String) }`
-  - `#[derive(Clone, PartialEq, Eq, Hash, Debug)] pub struct Query { pub range: usize, pub group: Group, pub net: Net, pub dir: DirF, pub sel: Sel, pub admin: bool, pub end_offset: usize /*steps back from now; 0 = live*/ }`
+  - `#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)] pub enum Span { Preset(u8) /*0=5m,1=3h,2=24h,3=7d,4=30d*/, Day(i64 /*local midnight, unix*/), Week(i64 /*Monday midnight*/), Month(i64 /*1st midnight*/), AllTime, Custom(i64, i64) /*[from, to) local midnights*/ }`
+  - `pub fn span_window(span: Span, now: i64, data: &Data) -> (i64 /*start*/, i64 /*end*/, i64 /*step*/, Source /*Live|Minutes|Hours*/)`
+  - `pub fn span_step(span: Span, dir: i8, data: &Data) -> Span` moves Day/Week/Month to the previous or next period that has stored data. It never goes past the current period.
+  - `#[derive(Clone, PartialEq, Eq, Hash, Debug)] pub struct Query { pub span: Span, pub group: Group, pub net: Net, pub dir: DirF, pub sel: Sel, pub admin: bool, pub end_offset: usize /*steps back from now; 0 = live; only for Preset spans*/ }`
   - `#[derive(Clone, Debug, Default)] pub struct Row { pub key: String, pub label: String, pub down: u64, pub up: u64, pub cc: Option<String>, pub icon_key: Option<String>, pub apps: Vec<String> /*Hosts rows: up to 3 app keys by bytes*/, pub more_apps: usize }`
   - `#[derive(Clone, Debug, Default)] pub struct Agg { pub times: Vec<i64>, pub step: i64, pub down: Vec<f64>, pub up: Vec<f64>, pub step_top: Vec<Vec<(String, [u64;2])>>, pub rows: Vec<Row>, pub hosts: Vec<Row>, pub types: Vec<Row>, pub countries: Vec<Row>, pub total: [u64;2], pub lan: [u64;2], pub wan: [u64;2], pub rate: [u64;2] }`
   - `pub fn aggregate(data: &Data, live: &VecDeque<LiveSample>, q: &Query, now: i64) -> Agg`
@@ -322,10 +325,12 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
     - range 0: `(q, newest live t, 0)`;
     - other ranges: `(q, newest bucket t, newest bucket down+up)`. That way 7d and 30d don't re-aggregate every second.
 - **Rules:**
-  - **Ranges.** The window and step logic comes from today's `traffic.rs::series` (:122-220); Task 7 removes it from there.
+  - **Spans.** Presets reuse today's window and step logic from `traffic.rs::series` (:122-220); Task 7 removes it from there.
     - 5m: every column, row and total comes from live samples (live flows for the newest 300).
     - 3h and 24h: minute buckets.
-    - 7d and 30d: hour buckets.
+    - Last 7 Days and Last 30 Days: hour buckets.
+    - Day, Week, Month, All Time and Custom: minute buckets if the window is 24 hours or less and fully inside minute retention, otherwise hour buckets. The window is clipped to the stored data, and a window with no data gives an empty `Agg`.
+    - Local midnights come from chrono `Local`.
   - **Residual.** For each bucket and app, `apps[k] − Σflows_of(k)` (saturating) is treated as type `UNCLASSIFIED`, country `UNCLASSIFIED` and host `UNCLASSIFIED`, all labelled "Not classified". This covers old buckets, limited-mode buckets and the upgrade bucket alike.
   - **`__other`.**
     - Apps and Publishers modes: its own row (`OTHER_KEY`, label `other_name(true)`).
@@ -364,6 +369,9 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - `rate_follows_selection_and_dir`
   - `hosts_split_by_country`: host "x" with 10 B in IT and 90 B in IL gives two rows with keys `x|IT` and `x|IL`.
   - `host_apps_top3`: a host used by 5 apps gives `apps.len()==3` and `more_apps==2`, ordered by bytes.
+  - `span_day_uses_hours_when_old`: a Day 3 days back reads hour buckets, giving 24 steps.
+  - `span_step_skips_to_data`: from today, stepping Day back lands on the newest earlier day that has buckets, and stepping forward from today stays on today.
+  - `custom_span_clipped`: a Custom range reaching before the oldest bucket starts at the oldest bucket.
   - `end_offset_shifts_window`: with `end_offset=2` on 3h, the window excludes the newest 2 minute buckets, and `max_offset` equals the stored minutes minus the window length.
   - `effective_limited`, and `limited_direction_works_other_present`: `admin=false` with `DirF::Out` works.
   - `cache_reuses_until_key_changes`
@@ -437,7 +445,13 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - **Sort keys.** `traffic`, `traffic.publisher`, `traffic.type` and `traffic.country`. The natural order is total descending.
   - **Direction filter.** Only one number column shows.
   - **Data source.** `Series` and `series()` are replaced by the cached `Agg` (via `AggCache`). Every section reads the same `Arc<Agg>`. The graph tooltip uses `step_top` and skips the series excluded by Direction.
-  - **Range menu.** It replaces `segmented_text(RANGE_CODES)` with `theme::menu` showing the `RANGES` names, e.g. "24 Hours ▾".
+  - **Time menu.** It replaces `segmented_text(RANGE_CODES)`.
+    - Items, using `theme::menu`, with divider support added to it: 5 Minutes, 3 Hours, 24 Hours, Last 7 Days, Last 30 Days | Day 📅, Week 📅, Month 📅, All Time | Custom. Draw the calendar icon as a new `Glyph::Calendar`.
+    - The button label is the current span, e.g. "24 Hours ▾" or "Day ▾".
+    - Day, Week and Month show a `◀ label ▶` stepper next to the menu, using `span_step`. Custom shows `From ◀ d ▶ To ◀ d ▶` day steppers.
+    - Changing the span resets `end_offset` to 0 and clears pause.
+    - Extend `theme::menu` with an `items: &[MenuItem]` form, where `MenuItem { label, icon: Option<Glyph>, divider_before: bool, disabled: bool }`. Keep a thin wrapper for the simple string-slice form.
+  - **Connected now shows speeds.** "Connected now" rows show each app's current ↓/↑ speed (from `apps_live` rate, through `theme::rate`) in the two number columns, not "N conns". The connection count goes in the row tooltip. In limited mode the cells show "—".
   - **Strip:**
     - A bell-plus icon above the gauge total, with the tooltip "Set a data alert". Clicking it pushes a new `Action::OpenSettings` that switches to the Settings page; add the variant and its handling in `mod.rs`.
     - ↓/↑ totals come from `Agg.total` and rates from `Agg.rate`. The excluded direction is dimmed and shows "—".
@@ -450,6 +464,8 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - `sort_list_key_per_mode`
   - `strip_cells_dim_excluded`: with `DirF::In`, ↑ is dimmed.
   - `cat_glyph_covers_all`
+  - `span_label`: `Preset(2)` gives "24 Hours", `Day(..)` gives "Day", and `AllTime` gives "All Time".
+  - `connected_cells_show_rates`: a pure `connected_cells(rate, admin)` gives formatted rates when admin and `["—","—"]` when limited.
 - [ ] **Step 2:** Run `cargo test traffic`. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run `cargo test` and `cargo build`. Commit "Traffic list: group by, network and direction filters".
@@ -538,7 +554,7 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
     - A 26 px strip under the graph and Bars views shows a faint area of `Agg.history`, time labels, and a draggable handle at the window end.
     - Dragging sets `end_offset` (from 0 to `Agg.max_offset`).
     - When `end_offset > 0`, a "Now" chip appears, and clicking it sets 0. The glide stops, and the list, Usage view and strip all use the offset `Query`.
-    - Changing range sets `end_offset = 0`.
+    - Changing the span sets `end_offset = 0`. The scrubber shows only for Preset spans.
     - The chart height budget at 1100×680 in limited mode is about 306 px minus 26 px, so about 280 px.
     - Pure helper: `fn offset_from_x(x: f32, strip: Rect, max_offset: usize, window: usize) -> usize`.
   - **Pause.**
