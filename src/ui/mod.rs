@@ -190,7 +190,7 @@ impl eframe::App for VantageApp {
             if let Some(t) = s.toast.take() {
                 self.toast = Some((t, Instant::now()));
             }
-            let unread = s.store.data.events.iter().filter(|e| !e.read && e.kind.important()).count();
+            let unread = log::unread_important(&s.store.data.events);
             theme::set_speed_bits(s.store.data.settings.speed_bits);
 
             egui::TopBottomPanel::top("nav")
