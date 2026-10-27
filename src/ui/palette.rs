@@ -21,81 +21,58 @@ macro_rules! palette {
 
 palette!(
     bg, panel, raised, row_alt, hover, selected, border, text, muted, faint, accent, accent2, down, up, good, bad, warn, orange,
-    bg_glow, bg_mid, bg_deep, glass_top, glass_bottom, glass_border, shadow, mesh_line, mesh_node, glow,
+    shadow,
 );
 
 const fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
-fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color32 {
-    Color32::from_rgba_unmultiplied(r, g, b, a)
-}
 
 pub fn dark() -> Palette {
-    let glass_top = rgba(90, 140, 255, 10);
     Palette {
-        bg: rgb(0x0a1426),
-        bg_glow: rgb(0x143a72),
-        bg_mid: rgb(0x0a1426),
-        bg_deep: rgb(0x05080f),
-        text: rgb(0xe6eefc),
-        muted: rgb(0x8a97b6),
-        faint: rgb(0x5c6884),
-        accent: rgb(0x2f6bff),
-        accent2: rgb(0x4fd1ff),
-        down: rgb(0x4fd1ff),
+        bg: rgb(0x14161b),
+        panel: rgb(0x1a1d23),
+        raised: rgb(0x21252d),
+        row_alt: rgb(0x1d2027),
+        hover: rgb(0x272c36),
+        selected: rgb(0x233352),
+        border: rgb(0x2a2f39),
+        text: rgb(0xe7eaf0),
+        muted: rgb(0x8d95a5),
+        faint: rgb(0x5c6370),
+        accent: rgb(0x5b8dff),
+        accent2: rgb(0x5b8dff),
+        down: rgb(0x2dd4bf),
         up: rgb(0xa78bfa),
-        good: rgb(0x5ee0a8),
+        good: rgb(0x34d399),
         bad: rgb(0xf87171),
         warn: rgb(0xfbbf24),
         orange: rgb(0xfb923c),
-        glass_top,
-        glass_bottom: rgba(255, 255, 255, 1),
-        glass_border: rgba(140, 180, 255, 16),
-        shadow: rgba(0, 0, 0, 90),
-        panel: glass_top,
-        raised: rgba(140, 170, 255, 4),
-        row_alt: rgba(120, 160, 255, 1),
-        hover: rgba(120, 170, 255, 8),
-        selected: rgba(60, 120, 255, 30),
-        border: rgba(140, 180, 255, 16),
-        mesh_line: rgba(61, 139, 255, 14),
-        mesh_node: rgba(127, 196, 255, 50),
-        glow: rgba(60, 120, 255, 90),
+        shadow: Color32::from_black_alpha(60),
     }
 }
 
 pub fn light() -> Palette {
-    let glass_top = rgba(255, 255, 255, 173);
     Palette {
-        bg: rgb(0xeef2f7),
-        bg_glow: rgb(0xc7d5ec),
-        bg_mid: rgb(0xe9eef5),
-        bg_deep: rgb(0xf3f5f9),
-        text: rgb(0x17243d),
-        muted: rgb(0x6b7890),
-        faint: rgb(0x9aa5b8),
-        accent: rgb(0x2f6fd6),
-        accent2: rgb(0x3c7be0),
-        down: rgb(0x2f6fd6),
+        bg: rgb(0xf3f4f7),
+        panel: rgb(0xffffff),
+        raised: rgb(0xeceef2),
+        row_alt: rgb(0xf7f8fa),
+        hover: rgb(0xe6e9ef),
+        selected: rgb(0xdde7fb),
+        border: rgb(0xdcdfe5),
+        text: rgb(0x1b1f27),
+        muted: rgb(0x5f6776),
+        faint: rgb(0x9aa1ad),
+        accent: rgb(0x3b6fe0),
+        accent2: rgb(0x3b6fe0),
+        down: rgb(0x0f9f8f),
         up: rgb(0x7c5cd6),
-        good: rgb(0x1f8a5c),
-        bad: rgb(0xd64545),
+        good: rgb(0x16a34a),
+        bad: rgb(0xdc2626),
         warn: rgb(0xb7791f),
         orange: rgb(0xc05621),
-        glass_top,
-        glass_bottom: rgba(255, 255, 255, 150),
-        glass_border: rgba(255, 255, 255, 242),
-        shadow: rgba(40, 70, 120, 20),
-        panel: glass_top,
-        raised: rgb(0xeaeff6),
-        row_alt: rgba(23, 36, 61, 6),
-        hover: rgba(36, 64, 122, 15),
-        selected: rgb(0xe7eefb),
-        border: rgba(23, 36, 61, 20),
-        mesh_line: rgba(90, 120, 168, 22),
-        mesh_node: rgba(90, 120, 168, 45),
-        glow: rgba(47, 111, 214, 40),
+        shadow: Color32::from_black_alpha(30),
     }
 }
 
@@ -122,6 +99,23 @@ mod tests {
             if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
         };
         0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+    }
+
+    #[test]
+    fn dark_is_classic_graphite() {
+        let p = dark();
+        assert_eq!(p.bg, rgb(0x14161b));
+        assert_eq!(p.panel, rgb(0x1a1d23));
+        assert_eq!(p.accent, rgb(0x5b8dff));
+        assert_eq!(p.down, rgb(0x2dd4bf));
+    }
+
+    #[test]
+    fn light_is_graphite_light() {
+        let p = light();
+        assert_eq!(p.bg, rgb(0xf3f4f7));
+        assert_eq!(p.panel, rgb(0xffffff));
+        assert_eq!(p.accent, rgb(0x3b6fe0));
     }
 
     #[test]

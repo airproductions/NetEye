@@ -1,4 +1,3 @@
-mod backdrop;
 mod firewall;
 mod hardware;
 mod log;
@@ -150,7 +149,6 @@ impl eframe::App for VantageApp {
         }
 
         self.update_theme(ctx, appearance);
-        backdrop::paint_backdrop(&ctx.layer_painter(egui::LayerId::background()), ctx.screen_rect());
         let mut actions = Vec::new();
         {
             let monitor = self.monitor.clone();
@@ -230,7 +228,7 @@ impl eframe::App for VantageApp {
             if t < 1.0 {
                 ctx.request_repaint();
             }
-            egui::CentralPanel::default().frame(egui::Frame::default().fill(Color32::TRANSPARENT)).show(ctx, |ui| {
+            egui::CentralPanel::default().frame(egui::Frame::default().fill(c::bg())).show(ctx, |ui| {
                 ui.set_opacity(e);
                 ui.add_space(8.0 * (1.0 - e));
                 match self.page {
@@ -301,8 +299,8 @@ impl VantageApp {
         egui::SidePanel::left("rail").exact_width(64.0).resizable(false).frame(egui::Frame::default()).show(ctx, |ui| {
             let full = ui.max_rect();
             let p = ui.painter().clone();
-            p.rect_filled(full, CornerRadius::ZERO, c::glass_top().gamma_multiply(0.5));
-            p.line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, c::glass_border()));
+            p.rect_filled(full, CornerRadius::ZERO, c::panel());
+            p.line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, c::border()));
 
             let (logo, slots, gear) = rail_slots(full, PAGES.len());
             p.rect_filled(logo, CornerRadius::same(9), c::accent());
@@ -485,8 +483,8 @@ fn status_chip(ui: &mut egui::Ui, g: Glyph, col: Color32, tip: &str) {
     ui.painter().rect(
         r,
         CornerRadius::same(14),
-        theme::lerp_color(c::glass_top(), c::hover(), t),
-        Stroke::new(1.0_f32, c::glass_border()),
+        theme::lerp_color(c::panel(), c::hover(), t),
+        Stroke::new(1.0_f32, c::border()),
         egui::StrokeKind::Inside,
     );
     theme::glyph(ui.painter(), r.shrink(6.0), g, col);

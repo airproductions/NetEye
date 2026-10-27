@@ -18,8 +18,7 @@ pub mod c {
         ($($f:ident),*) => { $(pub fn $f() -> Color32 { super::super::palette::current().$f })* };
     }
     accessors!(
-        bg, raised, row_alt, hover, selected, border, text, muted, faint, accent, accent2, down, up, good, bad, warn, orange,
-        bg_glow, bg_mid, bg_deep, glass_top, glass_bottom, glass_border, shadow, mesh_line, mesh_node, glow
+        bg, panel, raised, row_alt, hover, selected, border, text, muted, faint, accent, accent2, down, up, good, bad, warn, orange
     );
 }
 
@@ -84,10 +83,8 @@ pub fn setup(ctx: &egui::Context) {
 pub fn apply_visuals(ctx: &egui::Context, p: &super::palette::Palette) {
     let is_dark = p.bg.r() as u32 + p.bg.g() as u32 + p.bg.b() as u32 <= 384;
     let mut v = if is_dark { egui::Visuals::dark() } else { egui::Visuals::light() };
-    // popups sit above glass, so they need an opaque fill
-    let solid = lerp_color(p.bg, p.bg_glow, 0.35);
     v.panel_fill = p.bg;
-    v.window_fill = solid;
+    v.window_fill = p.raised;
     v.window_stroke = Stroke::new(1.0_f32, p.border);
     v.extreme_bg_color = p.panel;
     v.faint_bg_color = p.row_alt;
@@ -569,79 +566,37 @@ pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 }
 
 pub fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    let slot = ui.painter().add(Shape::Noop);
-    let resp = egui::Frame::default().corner_radius(CornerRadius::same(14)).inner_margin(egui::Margin::same(16)).show(ui, add);
-    ui.painter().set(slot, glass_shape(resp.response.rect, 14));
+    egui::Frame::default()
+        .fill(c::panel())
+        .stroke(Stroke::new(1.0_f32, c::border()))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(egui::Margin::same(16))
+        .show(ui, add);
 }
 
 // ---------------------------------------------------------------------------------------------
-// Glass
+// Flat surfaces (the names are kept from the glass look so pages keep compiling)
 
-/// Outline of a rounded rectangle, clockwise from the top-left arc.
-fn rounded_outline(r: Rect, radius: f32) -> Vec<Pos2> {
-    let rad = radius.min(r.width() / 2.0).min(r.height() / 2.0);
-    let corners = [
-        (Pos2::new(r.left() + rad, r.top() + rad), std::f32::consts::PI),
-        (Pos2::new(r.right() - rad, r.top() + rad), std::f32::consts::PI * 1.5),
-        (Pos2::new(r.right() - rad, r.bottom() - rad), 0.0),
-        (Pos2::new(r.left() + rad, r.bottom() - rad), std::f32::consts::PI * 0.5),
-    ];
-    let mut pts = Vec::with_capacity(4 * 7);
-    for (c0, a0) in corners {
-        for i in 0..=6 {
-            let a = a0 + std::f32::consts::FRAC_PI_2 * i as f32 / 6.0;
-            pts.push(c0 + Vec2::new(a.cos(), a.sin()) * rad);
-        }
-    }
-    pts
-}
-
-/// Shadow, diagonal translucent gradient and hairline border: the "glass" card look.
+/// Flat panel fill with a 1px border, no gradient and no shadow.
 pub fn glass_shape(r: Rect, radius: u8) -> Shape {
-    let shadow = egui::Shadow { offset: [0, 10], blur: 28, spread: 0, color: c::shadow() };
-    let outline = rounded_outline(r, radius as f32);
-    let (top, bottom) = (c::glass_top(), c::glass_bottom());
-    let diag = |q: Pos2| (((q.x - r.left()) / r.width().max(1.0)) + ((q.y - r.top()) / r.height().max(1.0))) / 2.0;
-    let mut mesh = Mesh::default();
-    mesh.vertices.push(Vertex { pos: r.center(), uv: egui::epaint::WHITE_UV, color: lerp_color(top, bottom, 0.5) });
-    for q in &outline {
-        mesh.vertices.push(Vertex { pos: *q, uv: egui::epaint::WHITE_UV, color: lerp_color(top, bottom, diag(*q).clamp(0.0, 1.0)) });
-    }
-    let n = outline.len() as u32;
-    for i in 0..n {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
-    }
-    let mut border = outline;
-    border.push(border[0]);
-    Shape::Vec(vec![
-        shadow.as_shape(r, CornerRadius::same(radius)).into(),
-        Shape::mesh(mesh),
-        Shape::line(border, Stroke::new(1.0_f32, c::glass_border())),
-    ])
+    Shape::Rect(egui::epaint::RectShape::new(r, CornerRadius::same(radius), c::panel(), Stroke::new(1.0_f32, c::border()), StrokeKind::Inside))
 }
 
 pub fn glass(p: &Painter, r: Rect, radius: u8) {
     p.add(glass_shape(r, radius));
 }
 
-/// Frame-based glass for layouts that need a `Frame` (flat fill, no gradient).
+/// Frame-based flat card for layouts that need a `Frame`.
 pub fn glass_frame() -> egui::Frame {
     egui::Frame::default()
-        .fill(c::glass_top())
-        .stroke(Stroke::new(1.0_f32, c::glass_border()))
-        .corner_radius(CornerRadius::same(14))
+        .fill(c::panel())
+        .stroke(Stroke::new(1.0_f32, c::border()))
+        .corner_radius(CornerRadius::same(10))
         .inner_margin(egui::Margin::same(14))
-        .shadow(egui::Shadow { offset: [0, 10], blur: 28, spread: 0, color: c::shadow() })
 }
 
-/// Soft outer glow around an active element; `t` scales its strength (0..1).
-pub fn glow(p: &Painter, r: Rect, radius: u8, t: f32) {
-    if t <= 0.0 {
-        return;
-    }
-    let col = c::glow().gamma_multiply(t.min(1.0));
-    p.add(egui::Shadow { offset: [0, 0], blur: 18, spread: 0, color: col }.as_shape(r, CornerRadius::same(radius)));
-}
+/// No-op: the flat look has no glow. Kept so existing callers compile.
+pub fn glow(_p: &Painter, _r: Rect, _radius: u8, _t: f32) {}
 
 // ---------------------------------------------------------------------------------------------
 // Charts
