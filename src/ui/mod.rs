@@ -42,6 +42,8 @@ pub enum Action {
     OpenApp(String, Pos2),
     /// Hash this file and open its VirusTotal page.
     VirusTotal(String),
+    /// Write the Usage view (rows, file name) to Downloads as CSV and reveal it.
+    ExportUsage(Vec<csv_export::ExportRow>, String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -159,8 +161,50 @@ impl VantageApp {
                     let dir = self.monitor.lock().store.dir.clone();
                     let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
                 }
+                Action::ExportUsage(rows, name) => {
+                    self.export_usage(&rows, &name);
+                    ctx.request_repaint();
+                }
             }
         }
+    }
+}
+
+impl VantageApp {
+    /// Runs after the lock is released: writes the CSV to Downloads, toasts, then reveals it.
+    fn export_usage(&mut self, rows: &[csv_export::ExportRow], name: &str) {
+        let Some(dir) = downloads_dir() else {
+            self.toast = Some(("Could not find the Downloads folder".into(), Instant::now()));
+            return;
+        };
+        let path = dir.join(name);
+        match std::fs::write(&path, csv_export::to_csv(rows)) {
+            Ok(()) => {
+                self.toast = Some((format!("Saved {name} to Downloads"), Instant::now()));
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("explorer").raw_arg(format!("/select,\"{}\"", path.display())).spawn();
+            }
+            Err(_) => self.toast = Some(("Could not save the CSV file".into(), Instant::now())),
+        }
+    }
+}
+
+/// The user's Downloads folder (wherever they moved it).
+fn downloads_dir() -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::{FOLDERID_Downloads, SHGetKnownFolderPath};
+    let mut p: windows_sys::core::PWSTR = std::ptr::null_mut();
+    // SAFETY: on success `p` is a NUL-terminated wide string the shell allocated; it is read once
+    // and freed with CoTaskMemFree, which also accepts the null left on failure.
+    unsafe {
+        let hr = SHGetKnownFolderPath(&FOLDERID_Downloads, 0, std::ptr::null_mut(), &mut p);
+        let out = (hr >= 0 && !p.is_null()).then(|| {
+            let len = (0..).take_while(|&i| *p.add(i) != 0).count();
+            std::path::PathBuf::from(std::ffi::OsString::from_wide(std::slice::from_raw_parts(p, len)))
+        });
+        CoTaskMemFree(p as *const _);
+        out
     }
 }
 

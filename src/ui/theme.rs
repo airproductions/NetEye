@@ -230,6 +230,8 @@ pub enum Glyph {
     Refresh,
     Check,
     Lock,
+    Export,
+    Columns,
 }
 
 pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
@@ -375,6 +377,17 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
         Glyph::Lock => {
             p.rect_stroke(Rect::from_min_max(pt(4.5, 9.0), pt(15.5, 17.5)), CornerRadius::same(2), s, StrokeKind::Middle);
             p.add(Shape::line(arc(pt(10.0, 9.0), 3.6 * u, -3.1416, 0.0), s));
+        }
+        Glyph::Export => {
+            // a tray with an arrow leaving it
+            line(&[(3.5, 11.5), (3.5, 16.5), (16.5, 16.5), (16.5, 11.5)]);
+            line(&[(10.0, 12.5), (10.0, 3.0)]);
+            line(&[(6.5, 6.5), (10.0, 3.0), (13.5, 6.5)]);
+        }
+        Glyph::Columns => {
+            for x in [3.0, 8.5, 14.0] {
+                p.rect_stroke(Rect::from_min_max(pt(x, 3.5), pt(x + 3.0, 16.5)), CornerRadius::same(1), s, StrokeKind::Middle);
+            }
         }
     }
 }

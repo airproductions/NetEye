@@ -1,13 +1,17 @@
 //! Traffic Monitor: per-app usage list on the left, live graph / usage bars / hosts on the right.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::app_popup;
+use super::csv_export;
 use super::motion;
 use super::sort::{self, SortSpec};
 use super::theme::{self, c, Glyph, Icons};
+use super::traffic_data::{self, Agg, AggCache, DirF, Group, Net, Query, Sel, Span};
+use super::usage_view;
 use super::Action;
 use crate::monitor::{Shared, OTHER_KEY};
 use crate::store::{self, HOUR, MINUTE};
@@ -105,6 +109,8 @@ pub struct TrafficPage {
     glide: Option<(usize, i64, f64)>,
     /// Strip numbers, gauge and bars ease only right after a selection change; data ticks snap.
     ease: motion::EaseGate,
+    /// Usage view and Bars read the shared aggregate (Task 8).
+    agg_cache: AggCache,
 }
 
 struct Series {
@@ -236,7 +242,7 @@ impl TrafficPage {
         lui.set_clip_rect(left.intersect(ui.clip_rect()));
         self.app_list(&mut lui, s, icons, &series, actions);
         let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink2(Vec2::new(24.0, 14.0))));
-        self.chart_area(&mut rui, s, icons, &series);
+        self.chart_area(&mut rui, s, icons, &series, actions);
         let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
         self.strip(&mut fui, s, &series, full.width(), ease);
     }
@@ -370,17 +376,23 @@ impl TrafficPage {
         });
     }
 
-    fn chart_area(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons, series: &Series) {
+    fn chart_area(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons, series: &Series, actions: &mut Vec<Action>) {
         let r = ui.max_rect();
         // header: mode switch on the left, clock + range codes on the right
         let head = Rect::from_min_size(r.min, Vec2::new(r.width(), 36.0));
         let mut hl = ui.new_child(egui::UiBuilder::new().max_rect(head).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        theme::segmented(&mut hl, &[(Glyph::Graph, "Live graph"), (Glyph::Bars, "Usage"), (Glyph::Globe, "Hosts")], &mut self.mode);
+        theme::segmented(&mut hl, &[(Glyph::Graph, "Graph"), (Glyph::Columns, "Usage"), (Glyph::Bars, "Bars")], &mut self.mode);
         let mut hr = ui.new_child(egui::UiBuilder::new().max_rect(head).layout(egui::Layout::right_to_left(egui::Align::Center)));
         theme::segmented_text(&mut hr, &RANGE_CODES, &mut self.range, Some(&RANGES));
         let (cr, cresp) = hr.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
         theme::glyph(hr.painter(), Rect::from_center_size(cr.center(), Vec2::splat(16.0)), Glyph::Clock, c::muted());
         cresp.on_hover_text("Time range");
+        let export = theme::icon_button(&mut hr, Glyph::Export, 28.0, "Export as CSV").clicked();
+        // only the Usage and Bars modes need the aggregate (cached, so this is cheap after the first frame)
+        let agg = (self.mode != 0 || export).then(|| self.agg(s));
+        if let (true, Some(agg)) = (export, &agg) {
+            actions.push(self.export(agg, s));
+        }
 
         // title row: which app the chart and strip are showing
         let title = Rect::from_min_size(Pos2::new(r.left(), r.top() + 44.0), Vec2::new(r.width(), 28.0));
@@ -402,10 +414,16 @@ impl TrafficPage {
         }
 
         let chart = Rect::from_min_max(Pos2::new(r.left(), r.top() + 90.0), Pos2::new(r.right(), r.bottom() - 28.0));
-        match self.mode {
-            0 => self.graph(ui, s, chart, series),
-            1 => self.bars(ui, chart, series),
-            _ => self.hosts(ui, s, chart, series),
+        match (self.mode, agg) {
+            (1, Some(agg)) => {
+                usage_view::sync(ui.ctx(), selection_key(self.range, self.selected.as_deref()));
+                let admin = s.admin;
+                let area = Rect::from_min_max(Pos2::new(r.left(), r.top() + 84.0), r.max);
+                let mut uui = ui.new_child(egui::UiBuilder::new().max_rect(area));
+                usage_view::show(&mut uui, &agg, s, icons, actions, admin);
+            }
+            (2, Some(agg)) => self.bars(ui, chart, &agg),
+            _ => self.graph(ui, s, chart, series),
         }
     }
 
@@ -509,7 +527,7 @@ impl TrafficPage {
         }
     }
 
-    fn bars(&self, ui: &mut egui::Ui, chart: Rect, series: &Series) {
+    fn bars(&self, ui: &mut egui::Ui, chart: Rect, series: &Agg) {
         // Group into calendar-friendly buckets: 10s, 5min, 1h, 1 day, 1 day
         let group = match self.range {
             0 => 10,
@@ -571,42 +589,6 @@ impl TrafficPage {
             }
         }
         p.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, c::border()));
-    }
-
-    fn hosts(&self, ui: &mut egui::Ui, s: &mut Shared, chart: Rect, series: &Series) {
-        let mut hosts: Vec<(&String, &[u64; 2])> = series.host_totals.iter().collect();
-        hosts.sort_by_key(|(_, v)| std::cmp::Reverse(v[0] + v[1]));
-        let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(chart));
-        if hosts.is_empty() {
-            let msg = if s.admin { "No host traffic recorded in this period." } else { "Per-host traffic needs administrator mode." };
-            theme::empty_state(&cui.painter_at(chart), chart.center(), msg);
-            return;
-        }
-        let max = hosts.first().map(|(_, v)| v[0] + v[1]).unwrap_or(1).max(1);
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut cui, |ui| {
-            for (host, v) in hosts.iter().take(200) {
-                let (row, resp) = ui.allocate_exact_size(Vec2::new(chart.width(), 40.0), Sense::hover());
-                let p = ui.painter();
-                if resp.hovered() {
-                    p.rect_filled(row, CornerRadius::same(6), c::hover());
-                }
-                theme::glyph(p, Rect::from_center_size(Pos2::new(row.left() + 18.0, row.center().y), Vec2::splat(16.0)), Glyph::Globe, c::muted());
-                let name_w = (row.width() * 0.42).min(420.0);
-                theme::text(p, Pos2::new(row.left() + 38.0, row.center().y), host, theme::regular(14.0), c::text(), name_w - 44.0);
-                let bar_l = row.left() + name_w;
-                let bar_w = row.width() - name_w - 190.0;
-                let total = v[0] + v[1];
-                let wd = bar_w * v[0] as f32 / max as f32;
-                let wu = bar_w * v[1] as f32 / max as f32;
-                let by = row.center().y;
-                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l, by - 4.0), Vec2::new(bar_w, 8.0)), CornerRadius::same(4), c::raised());
-                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l, by - 4.0), Vec2::new(wd.max(2.0), 8.0)), CornerRadius::same(4), c::down());
-                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l + wd, by - 4.0), Vec2::new(wu, 8.0)), CornerRadius::same(4), c::up());
-                theme::text_right(p, Pos2::new(row.right() - 100.0, by), &format!("↓ {}", theme::bytes(v[0])), theme::regular(13.0), c::text());
-                theme::text_right(p, Pos2::new(row.right() - 8.0, by), &format!("↑ {}", theme::bytes(v[1])), theme::regular(13.0), c::muted());
-                let _ = total;
-            }
-        });
     }
 
     /// Bottom usage strip: download total, today gauge, upload total, then the Internet/LAN split.
@@ -778,6 +760,44 @@ impl TrafficPage {
         if show_counts {
             p.text(Pos2::new(rx, cy + 12.0), Align2::RIGHT_CENTER, format!("{active} apps · {conns} connections"), theme::regular(13.0), c::muted());
         }
+    }
+}
+
+impl TrafficPage {
+    /// The cached aggregate for the current range and selection, under the saved filters.
+    fn agg(&mut self, s: &Shared) -> Arc<Agg> {
+        let st = &s.store.data.settings;
+        let (group, net) = traffic_data::effective(Group::from_u8(st.traffic_group), Net::from_u8(st.traffic_net), s.admin);
+        let q = Query {
+            span: Span::Preset(self.range as u8),
+            group,
+            net,
+            dir: DirF::from_u8(st.traffic_dir),
+            sel: self.selected.clone().map_or(Sel::All, Sel::App),
+            admin: s.admin,
+            end_offset: 0,
+        };
+        let now = s.live.back().map(|l| l.t).unwrap_or_else(store::now);
+        let key = traffic_data::cache_key(&q, &s.store.data, &s.live, now);
+        self.agg_cache.get(key, || traffic_data::aggregate(&s.store.data, &s.live, &q, now))
+    }
+
+    /// Snapshot of the Usage view for the export button; the selection and filters name the file.
+    fn export(&self, agg: &Agg, s: &Shared) -> Action {
+        let st = &s.store.data.settings;
+        let net = match traffic_data::effective(Group::Apps, Net::from_u8(st.traffic_net), s.admin).1 {
+            Net::All => "",
+            Net::Lan => "LAN",
+            Net::Wan => "WAN",
+        };
+        let dir = match DirF::from_u8(st.traffic_dir) {
+            DirF::Both => "",
+            DirF::In => "download",
+            DirF::Out => "upload",
+        };
+        let sel = self.selected.as_deref().map(|k| s.app_name(k)).unwrap_or_default();
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
+        Action::ExportUsage(usage_view::export_rows(agg, s), csv_export::file_name(RANGE_CODES[self.range], &sel, net, dir, &stamp))
     }
 }
 
