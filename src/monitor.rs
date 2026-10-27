@@ -171,6 +171,33 @@ pub struct Shared {
 }
 
 impl Shared {
+    /// Fresh state around a loaded store; the monitor threads fill the rest in.
+    pub fn new(store: Store) -> Self {
+        Self {
+            admin: net::is_admin() || crate::demo::on(),
+            store,
+            live: VecDeque::with_capacity(LIVE_SECONDS),
+            apps_live: HashMap::new(),
+            meta: HashMap::new(),
+            adapters: Vec::new(),
+            lans: Vec::new(),
+            windows_firewall_off: false,
+            hw: Hardware::default(),
+            names: HashMap::new(),
+            internet: None,
+            scanning: false,
+            online: HashSet::new(),
+            icons: HashMap::new(),
+            icon_requests: HashSet::new(),
+            toast: None,
+            firewall_busy: false,
+            firewall_product: None,
+            gateway: None,
+            local_ip: None,
+            asks: Vec::new(),
+        }
+    }
+
     pub fn app_name(&self, key: &str) -> String {
         if let Some(m) = self.meta.get(key) {
             return m.name.clone();
@@ -201,30 +228,9 @@ pub struct Monitor {
 
 impl Monitor {
     pub fn start(repaint: impl Fn() + Send + 'static) -> Self {
-        let store = Store::load();
-        let shared = Arc::new(Mutex::new(Shared {
-            admin: net::is_admin(),
-            store,
-            live: VecDeque::with_capacity(LIVE_SECONDS),
-            apps_live: HashMap::new(),
-            meta: HashMap::new(),
-            adapters: Vec::new(),
-            lans: Vec::new(),
-            windows_firewall_off: false,
-            hw: Hardware::default(),
-            names: HashMap::new(),
-            internet: None,
-            scanning: false,
-            online: HashSet::new(),
-            icons: HashMap::new(),
-            icon_requests: HashSet::new(),
-            toast: None,
-            firewall_busy: false,
-            firewall_product: None,
-            gateway: None,
-            local_ip: None,
-            asks: Vec::new(),
-        }));
+        let demo = crate::demo::on();
+        let store = if demo { Store::demo() } else { Store::load() };
+        let shared = Arc::new(Mutex::new(Shared::new(store)));
 
         let (dns_tx, dns_rx) = channel::<IpAddr>();
         let dns_rx = Arc::new(Mutex::new(dns_rx));
@@ -242,6 +248,13 @@ impl Monitor {
         }
 
         let m = Self { shared, dns_tx };
+        if demo {
+            // made-up data only: no network watching, firewall, scanning or monitors
+            crate::demo::seed(&mut m.lock());
+            let d = m.clone();
+            std::thread::Builder::new().name("demo".into()).spawn(move || crate::demo::run(d, repaint)).unwrap();
+            return m;
+        }
         let engine = m.clone();
         std::thread::Builder::new().name("monitor".into()).spawn(move || engine.run(repaint)).unwrap();
 
@@ -303,6 +316,12 @@ impl Monitor {
     }
 
     pub fn set_block(&self, key: &str, dir: Dir, block: bool) {
+        if crate::demo::on() {
+            if let Some(r) = self.lock().store.data.apps.get_mut(key) {
+                if dir == Dir::In { r.block_in = block } else { r.block_out = block }
+            }
+            return;
+        }
         let (path, admin, enabled, close_open) = {
             let s = self.lock();
             let Some(path) = s.store.data.apps.get(key).and_then(|a| a.path.clone()) else { return };
@@ -341,6 +360,10 @@ impl Monitor {
     }
 
     pub fn set_firewall_enabled(&self, enabled: bool) {
+        if crate::demo::on() {
+            self.lock().store.data.settings.firewall_enabled = enabled;
+            return;
+        }
         let (changes, admin, close_open) = {
             let s = self.lock();
             let mut c = Vec::new();
@@ -381,6 +404,10 @@ impl Monitor {
     /// Switches between Click to Block, Ask to Connect and Block All. Only Block All touches
     /// the filtering engine.
     pub fn set_firewall_mode(&self, mode: FirewallMode) {
+        if crate::demo::on() {
+            self.lock().store.data.settings.firewall_mode = mode;
+            return;
+        }
         let (old, admin) = {
             let s = self.lock();
             (s.store.data.settings.firewall_mode, s.admin)
@@ -421,6 +448,10 @@ impl Monitor {
     /// Applies a saved profile: every app's block state becomes what the profile recorded
     /// (apps the profile doesn't mention are allowed).
     pub fn apply_profile(&self, name: &str) {
+        if crate::demo::on() {
+            self.lock().toast = Some(format!("Profile \"{name}\" applied"));
+            return;
+        }
         let (changes, admin, close_open, updates) = {
             let s = self.lock();
             let Some(profile) = s.store.data.profiles.get(name) else { return };
@@ -701,7 +732,13 @@ impl Monitor {
     }
 
     pub fn request_scan(&self) {
-        self.lock().scanning = true;
+        let mut s = self.lock();
+        if crate::demo::on() {
+            s.scanning = false;
+            s.store.data.last_scan = Some(store::now());
+            return;
+        }
+        s.scanning = true;
     }
 
     fn scan(&self, oui: &HashMap<String, String>, baseline: bool) {

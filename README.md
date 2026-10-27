@@ -69,6 +69,8 @@ NetEye works without admin rights, but **run it as administrator** for the full 
 
 Use **Restart as administrator** in the app to switch at any time.
 
+**Demo mode:** `neteye.exe --demo` fills every page with made-up data (a month of history, live traffic, hosts around the world, alerts, devices) for screenshots and recordings. It runs next to a normal NetEye, never saves, and never touches the firewall or registry.
+
 ### Build from source
 
 You need Rust with the `x86_64-pc-windows-gnu` toolchain and MinGW-w64 (WinLibs) on `PATH`.

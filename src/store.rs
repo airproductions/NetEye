@@ -684,6 +684,8 @@ pub struct Store {
     pub dir: PathBuf,
     pub fresh: bool,
     dirty: bool,
+    /// Demo mode: nothing is ever written to disk.
+    ephemeral: bool,
 }
 
 impl Store {
@@ -710,7 +712,7 @@ impl Store {
             Some(d) => (d, false),
             None => (Data { created: now(), ..Default::default() }, true),
         };
-        Self { data, dir, fresh, dirty: false }
+        Self { data, dir, fresh, dirty: false, ephemeral: false }
     }
 
     pub fn mark_dirty(&mut self) {
@@ -728,7 +730,19 @@ impl Store {
 
     /// A copy of the data to save, with its generation, or `None` when nothing changed.
     /// Clears the dirty flag.
+    /// An empty store for demo mode: logs go to %TEMP%\neteye-demo and data is never saved.
+    pub fn demo() -> Self {
+        let dir = std::env::temp_dir().join("neteye-demo");
+        let _ = std::fs::create_dir_all(&dir);
+        crate::diag::init(&dir);
+        Self { data: Data { created: now(), ..Default::default() }, dir, fresh: false, dirty: false, ephemeral: true }
+    }
+
     pub fn snapshot(&mut self) -> Option<(PathBuf, u64, Data)> {
+        if self.ephemeral {
+            self.dirty = false;
+            return None;
+        }
         if !self.dirty {
             return None;
         }
@@ -817,7 +831,8 @@ impl Store {
                 a.up += v[1];
             }
         }
-        let day = chrono::Local::now().format("%Y-%m-%d").to_string();
+        // the sample's own local day (the live loop passes now; demo history passes the past)
+        let day = chrono::DateTime::from_timestamp(t, 0).unwrap_or_default().with_timezone(&chrono::Local).format("%Y-%m-%d").to_string();
         let l = self.data.daily_lan.entry(day.clone()).or_default();
         l[0] += totals[2];
         l[1] += totals[3];
@@ -914,7 +929,7 @@ mod appearance_tests {
 
     #[test]
     fn plan_usage_counts_direction_and_excludes_lan() {
-        let mut st = Store { data: Data::default(), dir: PathBuf::new(), fresh: true, dirty: false };
+        let mut st = Store { data: Data::default(), dir: PathBuf::new(), fresh: true, dirty: false, ephemeral: false };
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         st.data.daily.insert(today.clone(), [1000, 200]);
         st.data.daily_lan.insert(today.clone(), [300, 50]);
@@ -948,7 +963,7 @@ mod flow_tests {
     const T0: i64 = 1_789_999_200;
 
     fn store() -> Store {
-        Store { data: Data::default(), dir: PathBuf::new(), fresh: true, dirty: false }
+        Store { data: Data::default(), dir: PathBuf::new(), fresh: true, dirty: false, ephemeral: false }
     }
 
     fn flow(h: &str, ty: &str, cc: &str, d: u64, u: u64) -> Flow {
@@ -1305,7 +1320,7 @@ mod flow_tests {
     #[test]
     fn save_writes_through_snapshot() {
         let dir = temp_dir("save");
-        let mut st = Store { data: Data { created: 42, ..Default::default() }, dir: dir.clone(), fresh: false, dirty: true };
+        let mut st = Store { data: Data { created: 42, ..Default::default() }, dir: dir.clone(), fresh: false, dirty: true, ephemeral: false };
         st.save();
         let d: Data = serde_json::from_slice(&std::fs::read(dir.join("data.json")).unwrap()).unwrap();
         assert_eq!(d.created, 42);
@@ -1332,7 +1347,7 @@ mod flow_tests {
     #[test]
     #[ignore]
     fn snapshot_clone_time() {
-        let mut st = Store { data: heavy_fixture(), dir: PathBuf::new(), fresh: false, dirty: false };
+        let mut st = Store { data: heavy_fixture(), dir: PathBuf::new(), fresh: false, dirty: false, ephemeral: false };
         let mut times = Vec::new();
         for _ in 0..5 {
             st.mark_dirty();

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod demo;
 mod diag;
 mod geo;
 mod hw;
@@ -19,6 +20,9 @@ fn main() -> eframe::Result {
     if args.len() >= 3 && args[1] == "--fw-batch" {
         let _store = store::Store::load(); // initialises the diagnostics log
         std::process::exit(system::run_firewall_batch(&args[2]));
+    }
+    if args.iter().any(|a| a == "--demo") {
+        demo::enable();
     }
     // after "Restart as administrator" the old copy may still hold the mutex for a moment
     let restarting = args.iter().any(|a| a == net::RESTART_ARG);
@@ -43,7 +47,8 @@ fn single_instance(wait: bool) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW};
-    let name = net::wide(r"Local\NetEyeNetworkMonitor");
+    // the demo has its own lock, so it can run next to the real thing
+    let name = net::wide(if demo::on() { r"Local\NetEyeDemo" } else { r"Local\NetEyeNetworkMonitor" });
     unsafe {
         // Leaked on purpose: the mutex must live as long as the process.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);

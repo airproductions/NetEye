@@ -105,7 +105,7 @@ impl NetEyeApp {
         let tray = build_tray(&cc.egui_ctx, hwnd, quit.clone(), monitor.clone());
         crate::diag::log(&format!("ui ready: tray={} hwnd={}", tray.is_some(), hwnd.is_some()));
         // keep the startup entry on this exe and name (it was registered as "Vantage" before)
-        if monitor.lock().store.data.settings.run_on_startup {
+        if monitor.lock().store.data.settings.run_on_startup && !crate::demo::on() {
             crate::system::set_run_on_startup(true);
         }
         Self {
@@ -153,7 +153,7 @@ impl NetEyeApp {
                 Action::ApplyProfile(name) => self.monitor.apply_profile(&name),
                 Action::Answer(key, allow) => self.monitor.answer_ask(&key, allow),
                 Action::RunOnStartup(on) => {
-                    let ok = crate::system::set_run_on_startup(on);
+                    let ok = crate::demo::on() || crate::system::set_run_on_startup(on);
                     let mut s = self.monitor.lock();
                     if ok {
                         s.store.data.settings.run_on_startup = on;
