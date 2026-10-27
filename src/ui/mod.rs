@@ -5,6 +5,7 @@ mod motion;
 pub mod palette;
 mod scanner;
 mod settings;
+mod sort;
 pub mod theme;
 mod traffic;
 

@@ -63,6 +63,14 @@ pub enum FirewallMode {
     BlockAll,
 }
 
+/// Which column a list is sorted by and in which direction. Lives here (not in `ui::sort`) so the
+/// store does not depend on the UI; `ui::sort` re-exports it.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SortSpec {
+    pub col: u8,
+    pub desc: bool,
+}
+
 /// Saved block rules: app key -> (block incoming, block outgoing).
 pub type Profile = BTreeMap<String, (bool, bool)>;
 
@@ -96,6 +104,19 @@ pub struct Settings {
     /// Desktop notifications are muted until this time.
     pub snooze_until: Option<i64>,
     pub firewall_mode: FirewallMode,
+    /// Per-list sort order, keyed "traffic", "firewall", "scanner" or "hardware".
+    pub sorts: BTreeMap<String, SortSpec>,
+}
+
+#[allow(dead_code)] // Tasks 4-6 consume these.
+impl Settings {
+    pub fn sort_for(&self, list: &str, default: SortSpec) -> SortSpec {
+        self.sorts.get(list).copied().unwrap_or(default)
+    }
+
+    pub fn set_sort(&mut self, list: &str, spec: SortSpec) {
+        self.sorts.insert(list.to_string(), spec);
+    }
 }
 
 impl Default for Settings {
@@ -126,6 +147,7 @@ impl Default for Settings {
             run_on_startup: false,
             snooze_until: None,
             firewall_mode: FirewallMode::ClickToBlock,
+            sorts: BTreeMap::new(),
         }
     }
 }
@@ -403,6 +425,24 @@ mod appearance_tests {
         assert!(!s.notifications);
         assert_eq!(s.daily_cap_mb, 500);
         assert!(s.close_to_tray);
+    }
+
+    #[test]
+    fn old_settings_without_sorts_load() {
+        let s: Settings = serde_json::from_str(r#"{"daily_cap_mb":500}"#).unwrap();
+        assert!(s.sorts.is_empty());
+        assert_eq!(s.daily_cap_mb, 500);
+        let d = SortSpec { col: 3, desc: true };
+        assert_eq!(s.sort_for("firewall", d), d);
+    }
+
+    #[test]
+    fn sorts_round_trip() {
+        let mut s = Settings::default();
+        let spec = SortSpec { col: 4, desc: false };
+        s.set_sort("scanner", spec);
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.sort_for("scanner", SortSpec { col: 0, desc: true }), spec);
     }
 
     #[test]
