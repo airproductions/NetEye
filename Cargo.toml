@@ -1,0 +1,46 @@
+[package]
+name = "vantage"
+version = "1.0.0"
+edition = "2021"
+description = "Network monitor and firewall for Windows"
+authors = ["Idan Rubin"]
+license = "MIT"
+
+[dependencies]
+eframe = "0.31"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+dns-lookup = "2"
+notify-rust = "4"
+tray-icon = "0.19"
+raw-window-handle = "0.6"
+
+[dependencies.windows-sys]
+version = "0.59"
+features = [
+  "Win32_Foundation",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_Ndis",
+  "Win32_Networking_WinSock",
+  "Win32_System_Threading",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_Storage_FileSystem",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_Performance",
+  "Win32_System_SystemInformation",
+  "Win32_System_ProcessStatus",
+  "Win32_NetworkManagement_WindowsFilteringPlatform",
+  "Win32_System_Rpc",
+  "Win32_Security",
+]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
