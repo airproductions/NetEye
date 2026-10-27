@@ -149,13 +149,10 @@ fn connected_cells(rate: [u64; 2], admin: bool) -> [String; 2] {
     if admin { [theme::rate(rate[0] as f64), theme::rate(rate[1] as f64)] } else { [DASH.to_string(), DASH.to_string()] }
 }
 
-/// The aggregate's rate, or zero when the newest live second moved no bytes. Bucket spans are
-/// cached until a bucket changes, and an idle second changes none, so their rate would stick.
-fn live_rate(agg_rate: [u64; 2], newest: Option<[u64; 2]>) -> [u64; 2] {
-    match newest {
-        Some(v) if v != [0, 0] => agg_rate,
-        _ => [0, 0],
-    }
+/// Whether picking time-menu entry `i` (while `cur` is shown) sets a new span. Day, Week and
+/// Month (5-7) always do, so picking the kind already shown snaps back to the current period.
+fn span_pick_applies(i: usize, cur: usize) -> bool {
+    i != cur || (5..=7).contains(&i)
 }
 
 /// Time menu button label.
@@ -576,9 +573,11 @@ impl TrafficPage {
             .filter(|(_, n, _)| q.is_empty() || n.to_lowercase().contains(&q))
             .collect();
         order_apps(&mut rows, spec);
-        // Without admin there are no per-app byte counts; list connected apps (Apps mode only).
+        // Apps mode, both modes: every app with live connections now and its current speed
+        // (dashes in limited mode, which has no per-app bytes). Range rows are totals, so an app
+        // may appear in both.
         let mut connected: Vec<ConnRow> = Vec::new();
-        if !s.admin && group == Group::Apps {
+        if group == Group::Apps {
             for (k, l) in &s.apps_live {
                 let n = l.in_conns + l.out_conns;
                 let name = s.app_name(k);
@@ -676,7 +675,7 @@ impl TrafficPage {
         ];
         let cur = span_index(self.span);
         if let Some(i) = theme::menu_items(ui, "traffic-span", span_label(self.span), &items, cur, "") {
-            if i != cur {
+            if span_pick_applies(i, cur) {
                 self.set_span(span_for_index(i, now, data));
             }
         }
@@ -1120,7 +1119,8 @@ impl TrafficPage {
         ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0_f32, c::border()));
 
         // totals and live rate follow the selection and both filters
-        let cur = live_rate(agg.rate, s.live.back().map(|l| [l.down, l.up]));
+        // the current speed is read fresh each frame (one live sample), outside the cached aggregate
+        let cur = self.last_query.as_ref().map_or([0, 0], |q| td::live_rate(&s.store.data, &s.live, q));
         let total = agg.total;
         let dim = strip_dim(dir);
         let mut today = s.store.data.daily.get(&chrono::Local::now().format("%Y-%m-%d").to_string()).copied().unwrap_or([0, 0]);
@@ -1503,13 +1503,6 @@ mod tests {
     }
 
     #[test]
-    fn strip_rate_zero_when_newest_second_is_idle() {
-        assert_eq!(live_rate([10, 20], Some([0, 0])), [0, 0]);
-        assert_eq!(live_rate([10, 20], None), [0, 0]);
-        assert_eq!(live_rate([10, 20], Some([5, 0])), [10, 20]);
-    }
-
-    #[test]
     fn cat_glyph_covers_all() {
         use crate::ports::Cat;
         let all = [Cat::Web, Cat::Names, Cat::Files, Cat::Mail, Cat::Remote, Cat::Media, Cat::Games, Cat::System, Cat::Other];
@@ -1564,6 +1557,17 @@ mod tests {
         assert_eq!(custom_step(from, to, true, 1, oldest, today), (from, to));
         assert_eq!(custom_step(from, to, true, -1, oldest, today), (from, today));
         assert_eq!(custom_step(from, today, true, -1, oldest, today), (from, today));
+    }
+
+    #[test]
+    fn span_pick_snaps_calendar_kinds_to_now() {
+        for i in 5..=7 {
+            assert!(span_pick_applies(i, i));
+        }
+        for i in [0, 4, 8, 9] {
+            assert!(!span_pick_applies(i, i));
+        }
+        assert!(span_pick_applies(1, 0));
     }
 
     #[test]

@@ -337,8 +337,6 @@ pub struct Agg {
     /// Strip rows: follow selection and direction, ignore the network filter.
     pub lan: [u64; 2],
     pub wan: [u64; 2],
-    /// Newest live second under the same selection and filters.
-    pub rate: [u64; 2],
     /// The whole stored history for the range unit, as (t, down + up), for the scrubber.
     pub history: Vec<(i64, f64)>,
     /// Largest useful `end_offset` (Preset spans only).
@@ -1075,6 +1073,22 @@ fn sorted(mut rows: Vec<Row>) -> Vec<Row> {
     rows
 }
 
+/// The newest live second under `q`'s selection, network and direction: the strip's current
+/// speed. Kept out of the cached `Agg` (whose key needn't change on an idle second) and cheap
+/// enough to call every frame: it reads one live sample, never the history.
+pub fn live_rate(data: &Data, live: &VecDeque<LiveSample>, q: &Query) -> [u64; 2] {
+    let Some(l) = live.back() else { return [0, 0] };
+    let mut acc = Acc::new(data, q);
+    let mut st = Step::default();
+    st.fill_live(l, &mut acc.ix);
+    let mut view = Vec::new();
+    acc.view(&st, acc.sel.is_none(), &mut view);
+    view.iter().fold([0, 0], |mut s, a| {
+        add2(&mut s, a.v);
+        s
+    })
+}
+
 /// Everything the Traffic page shows for `q`. `now` is the newest live sample's time (or the
 /// clock when there is none).
 pub fn aggregate(data: &Data, live: &VecDeque<LiveSample>, q: &Query, now: i64) -> Agg {
@@ -1106,17 +1120,6 @@ fn run<'a>(data: &'a Data, live: &'a VecDeque<LiveSample>, q: &'a Query, now: i6
 
     let mut acc = Acc::new(data, q);
     let mut st = Step::default();
-
-    // Newest live second, for the rate.
-    if let Some(l) = live.back() {
-        st.fill_live(l, &mut acc.ix);
-        let mut view = Vec::new();
-        acc.view(&st, acc.sel.is_none(), &mut view);
-        agg.rate = view.iter().fold([0, 0], |mut s, a| {
-            add2(&mut s, a.v);
-            s
-        });
-    }
 
     if start >= end {
         return agg;
@@ -1494,7 +1497,7 @@ mod tests {
                 let agg = aggregate(&d, &live, &q, MIXED_NOW);
                 assert!(agg.total[0] > 0, "{span:?}");
                 assert_eq!(agg.total[1], 0);
-                assert_eq!(agg.rate, [7, 0]);
+                assert_eq!(live_rate(&d, &live, &q), [7, 0]);
                 assert!(!agg.rows.is_empty());
                 for rows in [&agg.rows, &agg.hosts, &agg.types, &agg.countries] {
                     assert!(rows.iter().all(|r| r.up == 0), "{span:?} {rows:?}");
@@ -1517,13 +1520,30 @@ mod tests {
             &[("a", "nas", "smb", geo::LAN, 30, 3), ("a", "y", "https", "US", 70, 7), ("b", "z", "https", "US", 50, 5)],
         ));
         let d = Data::default();
-        let rate = |sel: Sel, net: Net, dir: DirF| aggregate(&d, &live, &Query { net, dir, ..query(Span::Preset(3), Group::Apps, sel) }, T0).rate;
+        let rate = |sel: Sel, net: Net, dir: DirF| live_rate(&d, &live, &Query { net, dir, ..query(Span::Preset(3), Group::Apps, sel) });
         assert_eq!(rate(Sel::All, Net::All, DirF::Both), [150, 15]);
         assert_eq!(rate(Sel::App("a".into()), Net::All, DirF::Both), [100, 10]);
         assert_eq!(rate(Sel::App("a".into()), Net::All, DirF::Out), [0, 10]);
         assert_eq!(rate(Sel::App("a".into()), Net::Lan, DirF::Both), [30, 3]);
         assert_eq!(rate(Sel::All, Net::Wan, DirF::Both), [120, 12]);
         assert_eq!(rate(Sel::Group(Group::Countries, "US".into()), Net::All, DirF::In), [120, 0]);
+    }
+
+    #[test]
+    fn rate_is_fresh_after_an_idle_second() {
+        let mut d = Data::default();
+        d.minutes.push_back(bucket(T0, &[("a", [100, 10])], &[]));
+        let mut live = VecDeque::new();
+        live.push_back(sample(T0 + 1, &[("a", [40, 4])], &[]));
+        let q = query(Span::Preset(3), Group::Apps, Sel::All);
+        let mut cache = AggCache::default();
+        let key = cache_key(&q, &d, &live, T0 + 1);
+        cache.get(key.clone(), || aggregate(&d, &live, &q, T0 + 1));
+        assert_eq!(live_rate(&d, &live, &q), [40, 4]);
+        // an idle second leaves the bucket (and so the cache key) alone, but not the rate
+        live.push_back(sample(T0 + 2, &[], &[]));
+        assert_eq!(cache_key(&q, &d, &live, T0 + 2), key);
+        assert_eq!(live_rate(&d, &live, &q), [0, 0]);
     }
 
     #[test]
@@ -1675,7 +1695,7 @@ mod tests {
         assert_eq!(keys(&agg.rows), [OTHER_KEY]);
         assert_eq!(bytes(&agg.rows, OTHER_KEY), Some([0, 20]));
         assert_eq!(agg.total, [0, 20]);
-        assert_eq!(agg.rate, [0, 3]);
+        assert_eq!(live_rate(&d, &live, &q), [0, 3]);
         assert_eq!(agg.wan, [0, 20]);
         assert_eq!(sum(&agg.hosts), agg.total);
     }

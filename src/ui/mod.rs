@@ -160,6 +160,7 @@ impl VantageApp {
                 Action::OpenApp(key, pos) => self.app_popup = Some(app_popup::AppPopup::new(key, pos)),
                 Action::VirusTotal(path) => app_popup::start_virustotal(self.monitor.clone(), ctx.clone(), path),
                 Action::OpenSettings => {
+                    settings::focus_plan(ctx);
                     if self.page != Page::Settings {
                         self.page = Page::Settings;
                         self.page_changed = Instant::now();
