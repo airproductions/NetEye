@@ -402,6 +402,8 @@ pub struct TrafficPage {
     title_row: Rect,
     /// The camera button was pressed; chart_area turns it into a SaveGraph action.
     want_shot: bool,
+    /// The 3D globe (chart mode 2).
+    globe: super::globe::GlobeView,
     span: Span,
     mode: usize,
     sel: Sel,
@@ -432,6 +434,7 @@ impl Default for TrafficPage {
         Self {
             title_row: Rect::NOTHING,
             want_shot: false,
+            globe: Default::default(),
             span: Span::Preset(0),
             mode: 0,
             sel: Sel::All,
@@ -746,7 +749,7 @@ impl TrafficPage {
         // header: mode switch on the left, time menu (and steppers) on the right
         let head = Rect::from_min_size(r.min, Vec2::new(r.width(), 36.0));
         let mut hl = ui.new_child(egui::UiBuilder::new().max_rect(head).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        theme::segmented(&mut hl, &[(Glyph::Graph, "Graph"), (Glyph::Columns, "Usage"), (Glyph::Bars, "Bars")], &mut self.mode);
+        theme::segmented(&mut hl, &[(Glyph::Graph, "Graph"), (Glyph::Columns, "Usage"), (Glyph::Globe, "Globe")], &mut self.mode);
         let mut hr = ui.new_child(egui::UiBuilder::new().max_rect(head).layout(egui::Layout::right_to_left(egui::Align::Center)));
         let now = s.live.back().map(|l| l.t).unwrap_or_else(store::now);
         self.time_controls(&mut hr, &s.store.data, now);
@@ -787,8 +790,8 @@ impl TrafficPage {
             }
         }
 
-        // the timeline scrubber sits under the Graph and Bars views, for the preset spans only
-        let scrub = self.mode != 1 && matches!(self.span, Span::Preset(p) if p > 0);
+        // the timeline scrubber sits under the Graph view, for the preset spans only
+        let scrub = self.mode == 0 && matches!(self.span, Span::Preset(p) if p > 0);
         let bottom = if scrub { r.bottom() - SCRUB_H - 30.0 } else { r.bottom() - 28.0 };
         let chart = Rect::from_min_max(Pos2::new(r.left(), r.top() + 90.0), Pos2::new(r.right(), bottom));
         match self.mode {
@@ -799,7 +802,10 @@ impl TrafficPage {
                 let mut uui = ui.new_child(egui::UiBuilder::new().max_rect(area));
                 usage_view::show(&mut uui, agg, s, icons, actions, admin);
             }
-            2 => self.bars(ui, chart, agg, dir),
+            2 => {
+                let area = Rect::from_min_max(Pos2::new(r.left(), r.top() + 80.0), r.max);
+                self.globe.show(ui, s, icons, agg, area);
+            }
             _ => {
                 let view = self.paused.clone().unwrap_or_else(|| agg.clone());
                 self.graph(ui, s, chart, &view, group, dir);
@@ -1084,73 +1090,6 @@ impl TrafficPage {
         } else {
             theme::label(&mut tui, "Live", theme::semibold(12.0), c::muted());
         }
-    }
-
-    fn bars(&self, ui: &mut egui::Ui, chart: Rect, agg: &Agg, dir: DirF) {
-        // Group into calendar-friendly buckets: 10s, 5min (3h), 1h (24h), 1 day
-        let group = if agg.step < MINUTE {
-            10
-        } else if agg.step < HOUR {
-            if agg.times.len() <= 180 { 5 } else { 60 }
-        } else {
-            24
-        };
-        let show = [dir != DirF::Out, dir != DirF::In];
-        let mut groups: Vec<(i64, f64, f64)> = Vec::new();
-        for (i, chunk) in agg.down.chunks(group).enumerate() {
-            let up: f64 = agg.up[i * group..(i * group + chunk.len())].iter().sum();
-            groups.push((agg.times[i * group], chunk.iter().sum(), up));
-        }
-        let max = groups.iter().map(|g| g.1.max(g.2)).fold(0.0, f64::max);
-        let p = ui.painter_at(chart.expand(30.0));
-        if max <= 0.0 {
-            theme::empty_state(&p, chart.center(), "No traffic in this period. Try another time range.");
-            return;
-        }
-        let len = agg.times.len() as i64 * agg.step;
-        let nice = theme::nice_max(max);
-        for i in 1..=4 {
-            let y = chart.bottom() - chart.height() * i as f32 / 4.0;
-            p.line_segment([Pos2::new(chart.left(), y), Pos2::new(chart.right(), y)], Stroke::new(1.0_f32, c::border()));
-            p.text(Pos2::new(chart.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::bytes((nice * i as f64 / 4.0) as u64), theme::regular(11.5), c::faint());
-        }
-        let slot = chart.width() / groups.len() as f32;
-        let bw = (slot * 0.34).min(16.0);
-        let resp = ui.interact(chart, ui.id().with("bars"), Sense::hover());
-        let hover = resp.hover_pos().map(|pos| ((pos.x - chart.left()) / slot) as usize);
-        for (i, (t, d, u)) in groups.iter().enumerate() {
-            let cx = chart.left() + slot * (i as f32 + 0.5);
-            if hover == Some(i) {
-                p.rect_filled(Rect::from_center_size(Pos2::new(cx, chart.center().y), Vec2::new(slot, chart.height())), CornerRadius::same(4), c::hover());
-            }
-            for (v, col, off) in [(d, c::down(), -bw / 2.0 - 1.0), (u, c::up(), bw / 2.0 + 1.0)] {
-                let h = (*v / nice) as f32 * chart.height();
-                if h > 0.5 {
-                    p.rect_filled(
-                        Rect::from_min_max(Pos2::new(cx + off - bw / 2.0, chart.bottom() - h), Pos2::new(cx + off + bw / 2.0, chart.bottom())),
-                        CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 },
-                        col,
-                    );
-                }
-            }
-            let every = (groups.len() / 10).max(1);
-            if i % every == 0 {
-                p.text(Pos2::new(cx, chart.bottom() + 8.0), Align2::CENTER_TOP, tick_label(agg.step, len, *t), theme::regular(12.0), c::muted());
-            }
-            if hover == Some(i) {
-                let (d, u, t) = (*d, *u, *t);
-                let text = match show {
-                    [true, false] => format!("↓ {}", theme::bytes(d as u64)),
-                    [false, true] => format!("↑ {}", theme::bytes(u as u64)),
-                    _ => format!("↓ {}   ↑ {}", theme::bytes(d as u64), theme::bytes(u as u64)),
-                };
-                egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("btip"), |ui| {
-                    theme::label(ui, theme::date_time(t), theme::semibold(13.0), c::text());
-                    theme::label(ui, text, theme::regular(13.0), c::text());
-                });
-            }
-        }
-        p.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, c::border()));
     }
 
     /// Bottom usage strip: download total, today gauge, upload total, then the Internet/LAN split.

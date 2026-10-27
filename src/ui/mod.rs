@@ -1,6 +1,7 @@
 mod app_popup;
 mod csv_export;
 mod flags;
+mod globe;
 mod firewall;
 mod hardware;
 mod host_popup;

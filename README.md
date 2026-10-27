@@ -28,7 +28,7 @@
     </td>
     <td width="50%" valign="top">
       <h3>🌍 Hosts &amp; countries</h3>
-      Every host each app talked to, split by country with flags. Click a host for its IP (copy it or check it on VirusTotal) and per-app usage; click a country for all of its hosts. Country lookup is built in, so nothing is sent anywhere.
+      Every host each app talked to, split by country with flags. Click a host for its IP (copy it or check it on VirusTotal) and per-app usage; click a country for all of its hosts. A 3D globe shows where your traffic goes, with arcs from your country and live connections. Country lookup is built in, so nothing is sent anywhere.
     </td>
   </tr>
   <tr>
@@ -93,6 +93,7 @@ The app is written to `target/release/neteye.exe`.
 NetEye bundles the following at build time. Nothing is downloaded at runtime.
 
 - **Country lookup**: IP Geolocation by [DB-IP](https://db-ip.com), the "IP to Country Lite" database, release 2026-10, used unmodified (only decompressed). Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See `assets/geo/README.md` and `assets/geo/DBIP-LICENSE.txt`.
+- **Globe map**: land shapes from [Natural Earth](https://www.naturalearthdata.com) 1:110m countries, public domain, turned into dots by `tools/globe-dots`. See `assets/geo/README.md`.
 - **Country flags**: [flag-icons](https://github.com/lipis/flag-icons) v7.6.0 by lipis, MIT License. The SVGs were rasterised into an atlas; the artwork is unchanged. See `assets/flags/README.md` and `assets/flags/LICENSE`.
 - **Font**: [Manrope](https://github.com/googlefonts/manrope) by The Manrope Project Authors, SIL Open Font License 1.1. See `assets/fonts/OFL.txt`.
 

@@ -17,12 +17,13 @@ Re-checked against the code at `classic-graphite`. The tables below are the morn
 
 **Done in the security-monitor batch:** S7 camera and microphone use, S8/S9/S10 executable, publisher and signature changes, S15 new network adapters, D7 signed status in the app popup.
 
-Still missing after both batches:
+**Done:** G10 live world map, as a 3D globe (Traffic → Globe).
+
+Still missing:
 
 | Area | Feature | Effort |
 |---|---|---|
 | Graph | Live connections page (G9; today: Connected now list + firewall row expansion) | M |
-| Graph | Live world map (G10) | L |
 | Graph | Block by country (G11, blocking half) | L |
 | Firewall | Settings/firewall password (F14, T11) | M |
 | Firewall | Custom IP/host/port rules (F17) | M |
