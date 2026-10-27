@@ -23,6 +23,11 @@ use theme::{c, Glyph, Icons};
 pub enum Action {
     Block(String, Dir, bool),
     FirewallEnabled(bool),
+    FirewallMode(crate::store::FirewallMode),
+    ApplyProfile(String),
+    /// Ask to Connect answer: (app key, allow?)
+    Answer(String, bool),
+    RunOnStartup(bool),
     Scan,
     RelaunchAdmin,
     OpenDataDir,
@@ -98,6 +103,19 @@ impl VantageApp {
             match a {
                 Action::Block(key, dir, block) => self.monitor.set_block(&key, dir, block),
                 Action::FirewallEnabled(on) => self.monitor.set_firewall_enabled(on),
+                Action::FirewallMode(m) => self.monitor.set_firewall_mode(m),
+                Action::ApplyProfile(name) => self.monitor.apply_profile(&name),
+                Action::Answer(key, allow) => self.monitor.answer_ask(&key, allow),
+                Action::RunOnStartup(on) => {
+                    let ok = crate::system::set_run_on_startup(on);
+                    let mut s = self.monitor.lock();
+                    if ok {
+                        s.store.data.settings.run_on_startup = on;
+                        s.store.mark_dirty();
+                    } else {
+                        s.toast = Some("Could not change the startup setting".into());
+                    }
+                }
                 Action::Scan => self.monitor.request_scan(),
                 Action::RelaunchAdmin => {
                     self.monitor.save();
@@ -142,6 +160,7 @@ impl eframe::App for VantageApp {
                 self.toast = Some((t, Instant::now()));
             }
             let unread = s.store.data.events.iter().filter(|e| !e.read && e.kind.important()).count();
+            theme::set_speed_bits(s.store.data.settings.speed_bits);
 
             self.rail(ctx, unread);
             self.header(ctx, s.internet, s.store.data.settings.firewall_enabled, s.admin);
@@ -169,6 +188,37 @@ impl eframe::App for VantageApp {
                                 ui.add_space(8.0);
                                 if theme::primary_button(ui, "Restart as administrator").clicked() {
                                     actions.push(Action::RelaunchAdmin);
+                                }
+                            });
+                        });
+                    });
+            }
+
+            if let Some(key) = s.asks.first().cloned() {
+                let name = s.app_name(&key);
+                let more = s.asks.len() - 1;
+                egui::TopBottomPanel::top("ask")
+                    .exact_height(50.0)
+                    .frame(egui::Frame::default().inner_margin(egui::Margin { left: 20, right: 20, top: 0, bottom: 6 }))
+                    .show(ctx, |ui| {
+                        let bar = ui.max_rect();
+                        let a = c::accent();
+                        ui.painter().rect(bar, CornerRadius::same(10), theme::with_alpha(a, 28), Stroke::new(1.0_f32, theme::with_alpha(a, 70)), egui::StrokeKind::Inside);
+                        ui.horizontal_centered(|ui| {
+                            ui.add_space(12.0);
+                            let ir = Rect::from_center_size(ui.cursor().min + Vec2::new(10.0, 22.0), Vec2::splat(20.0));
+                            self.icons.draw(ui, s, &key, ir, &name);
+                            ui.add_space(28.0);
+                            theme::label(ui, format!("{name} wants to connect to the internet."), theme::semibold(13.5), c::text());
+                            let tail = if more > 0 { format!("Blocked until you decide · {more} more waiting") } else { "Blocked until you decide.".to_string() };
+                            theme::label(ui, tail, theme::regular(13.5), c::muted());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.add_space(8.0);
+                                if theme::pill(ui, "Keep blocked", None, false).clicked() {
+                                    actions.push(Action::Answer(key.clone(), false));
+                                }
+                                if theme::primary_button(ui, "Allow").clicked() {
+                                    actions.push(Action::Answer(key.clone(), true));
                                 }
                             });
                         });

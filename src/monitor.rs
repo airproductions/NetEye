@@ -4,19 +4,24 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::hw::{ProcSample, Sampler, SystemSample};
 use crate::net::{self, Adapter, Conn, Proto, TcpState};
-use crate::store::{self, AppRecord, DeviceRecord, EventKind, Store};
+use crate::store::{self, AppRecord, DeviceRecord, EventKind, FirewallMode, Store};
 use crate::system::{self, Dir};
 
 pub const LIVE_SECONDS: usize = 3600;
 pub const HW_SECONDS: usize = 300;
 pub const SYSTEM_KEY: &str = "system";
 pub const OTHER_KEY: &str = "__other";
+const RDP_PORT: u16 = 3389;
+
+/// Desktop notifications stay quiet until this unix time (Settings → Snooze).
+static SNOOZE_UNTIL: AtomicI64 = AtomicI64::new(0);
 
 #[derive(Clone, Debug)]
 pub struct LiveSample {
@@ -91,6 +96,8 @@ pub struct Shared {
     pub firewall_product: Option<String>,
     pub gateway: Option<String>,
     pub local_ip: Option<String>,
+    /// Ask to Connect: apps blocked on first connection, waiting for the user's answer.
+    pub asks: Vec<String>,
 }
 
 impl Shared {
@@ -144,6 +151,7 @@ impl Monitor {
             firewall_product: None,
             gateway: None,
             local_ip: None,
+            asks: Vec::new(),
         }));
 
         let (dns_tx, dns_rx) = channel::<IpAddr>();
@@ -171,6 +179,8 @@ impl Monitor {
         std::thread::spawn(move || inet.internet_loop());
         let scan = m.clone();
         std::thread::spawn(move || scan.scan_loop());
+        let sec = m.clone();
+        std::thread::spawn(move || sec.security_loop());
         m
     }
 
@@ -290,6 +300,170 @@ impl Monitor {
         });
     }
 
+    /// Switches between Click to Block, Ask to Connect and Block All. Only Block All touches
+    /// the filtering engine.
+    pub fn set_firewall_mode(&self, mode: FirewallMode) {
+        let (old, admin) = {
+            let s = self.lock();
+            (s.store.data.settings.firewall_mode, s.admin)
+        };
+        if old == mode {
+            return;
+        }
+        let me = self.clone();
+        self.lock().firewall_busy = true;
+        std::thread::spawn(move || {
+            let res = if (old == FirewallMode::BlockAll) != (mode == FirewallMode::BlockAll) {
+                system::set_block_all(mode == FirewallMode::BlockAll, admin)
+            } else {
+                Ok(())
+            };
+            let mut s = me.lock();
+            s.firewall_busy = false;
+            match res {
+                Ok(()) => {
+                    s.store.data.settings.firewall_mode = mode;
+                    s.store.mark_dirty();
+                    let msg = match mode {
+                        FirewallMode::ClickToBlock => "Firewall mode: Click to Block",
+                        FirewallMode::AskToConnect => "Firewall mode: Ask to Connect",
+                        FirewallMode::BlockAll => "Firewall mode: Block All (all outgoing traffic is blocked)",
+                    };
+                    s.store.add_event(EventKind::Firewall, None, msg.into());
+                    s.toast = Some(msg.into());
+                }
+                Err(e) => {
+                    crate::diag::log(&format!("firewall mode change failed: {e}"));
+                    s.toast = Some(format!("Firewall change failed: {e}"));
+                }
+            }
+        });
+    }
+
+    /// Applies a saved profile: every app's block state becomes what the profile recorded
+    /// (apps the profile doesn't mention are allowed).
+    pub fn apply_profile(&self, name: &str) {
+        let (changes, admin, close_open, updates) = {
+            let s = self.lock();
+            let Some(profile) = s.store.data.profiles.get(name) else { return };
+            let mut changes = Vec::new();
+            let mut updates = Vec::new();
+            for (k, a) in &s.store.data.apps {
+                let (want_in, want_out) = profile.get(k).copied().unwrap_or((false, false));
+                let Some(p) = a.path.as_ref().filter(|p| !system::is_protected(p)) else { continue };
+                if a.block_in != want_in {
+                    changes.push((p.clone(), Dir::In, want_in));
+                }
+                if a.block_out != want_out {
+                    changes.push((p.clone(), Dir::Out, want_out));
+                }
+                updates.push((k.clone(), want_in, want_out));
+            }
+            if !s.store.data.settings.firewall_enabled {
+                changes.clear(); // rules are recorded and applied when the firewall is turned on
+            }
+            (changes, s.admin, s.store.data.settings.close_on_block, updates)
+        };
+        let me = self.clone();
+        let name = name.to_string();
+        self.lock().firewall_busy = true;
+        std::thread::spawn(move || {
+            let res = system::apply_firewall(&changes, admin, close_open);
+            let mut s = me.lock();
+            s.firewall_busy = false;
+            match res {
+                Ok(()) => {
+                    for (k, i, o) in updates {
+                        if let Some(a) = s.store.data.apps.get_mut(&k) {
+                            a.block_in = i;
+                            a.block_out = o;
+                        }
+                    }
+                    s.store.data.active_profile = Some(name.clone());
+                    s.store.add_event(EventKind::Firewall, None, format!("Switched to firewall profile \"{name}\""));
+                    s.toast = Some(format!("Firewall profile \"{name}\" is active"));
+                }
+                Err(e) => {
+                    crate::diag::log(&format!("profile switch failed: {e}"));
+                    s.toast = Some(format!("Firewall change failed: {e}"));
+                }
+            }
+        });
+    }
+
+    /// Answers an Ask to Connect prompt.
+    pub fn answer_ask(&self, key: &str, allow: bool) {
+        self.lock().asks.retain(|k| k != key);
+        if allow {
+            self.set_block(key, Dir::Out, false);
+        }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Security monitors: DNS servers, proxy settings and the gateway's MAC (ARP spoofing)
+
+    fn security_loop(&self) {
+        let mut tick: u64 = 0;
+        loop {
+            let st = self.lock().store.data.settings.clone();
+            if st.monitor_dns {
+                let now = system::dns_servers();
+                let mut s = self.lock();
+                if !now.is_empty() && s.store.data.dns_servers.as_ref() != Some(&now) {
+                    if s.store.data.dns_servers.is_some() {
+                        let msg = format!("DNS servers changed to {}", now.join(", "));
+                        s.store.add_event(EventKind::DnsChanged, None, now.join(", "));
+                        if st.notifications {
+                            notify(&msg);
+                        }
+                    }
+                    s.store.data.dns_servers = Some(now);
+                    s.store.mark_dirty();
+                }
+            }
+            if st.monitor_proxy {
+                let now = system::proxy_settings();
+                let mut s = self.lock();
+                if s.store.data.proxy.as_deref() != Some(now.as_str()) {
+                    if s.store.data.proxy.is_some() {
+                        s.store.add_event(EventKind::ProxyChanged, None, now.clone());
+                        if st.notifications {
+                            notify(&format!("Proxy settings changed: {now}"));
+                        }
+                    }
+                    s.store.data.proxy = Some(now);
+                    s.store.mark_dirty();
+                }
+            }
+            if st.monitor_arp && tick % 3 == 0 {
+                if let Some((gw, mac)) = system::lan().and_then(|l| Some((l.gateway?, system::arp(&l, l.gateway?)?))) {
+                    self.check_gateway(&gw.to_string(), &mac);
+                }
+            }
+            tick += 1;
+            std::thread::sleep(Duration::from_secs(10));
+        }
+    }
+
+    /// Records the gateway's MAC; a different MAC for the same gateway IP means another
+    /// device may be answering for the router (ARP spoofing).
+    fn check_gateway(&self, ip: &str, mac: &str) {
+        let mut s = self.lock();
+        let notify_on = s.store.data.settings.notifications && s.store.data.settings.monitor_arp;
+        if let Some((old_ip, old_mac)) = s.store.data.gateway_mac.clone() {
+            if old_ip == ip && old_mac != mac {
+                s.store.add_event(EventKind::ArpSpoof, None, format!("{ip}: {old_mac} → {mac}"));
+                if notify_on {
+                    notify(&format!("Possible ARP spoofing: your router {ip} now answers from a different device ({mac})."));
+                }
+            }
+        }
+        if s.store.data.gateway_mac.as_ref().map(|(i, m)| (i.as_str(), m.as_str())) != Some((ip, mac)) {
+            s.store.data.gateway_mac = Some((ip.to_string(), mac.to_string()));
+            s.store.mark_dirty();
+        }
+    }
+
     // -----------------------------------------------------------------------------------------
     // Internet + LAN scanning
 
@@ -315,12 +489,15 @@ impl Monitor {
         let oui = system::load_oui(&self.lock().store.dir);
         let mut first = true;
         loop {
-            let auto = self.lock().store.data.settings.auto_scan;
+            let (auto, minutes) = {
+                let s = self.lock();
+                (s.store.data.settings.auto_scan, s.store.data.settings.scan_minutes.max(1))
+            };
             if first || auto {
                 self.scan(&oui, first);
             }
             first = false;
-            for _ in 0..300 {
+            for _ in 0..minutes * 60 {
                 std::thread::sleep(Duration::from_secs(1));
                 if self.lock().scanning {
                     break; // manual scan requested
@@ -339,6 +516,7 @@ impl Monitor {
         let gw = lan.as_ref().and_then(|l| l.gateway);
         let me_ip = lan.as_ref().map(|l| l.ip);
         let mut found = lan.as_ref().map(system::scan_subnet).unwrap_or_default();
+        let found_gw = found.iter().find(|(ip, _)| Some(*ip) == gw).cloned();
         if let Some(l) = &lan {
             found.push((l.ip, l.mac.clone()));
         }
@@ -372,8 +550,11 @@ impl Monitor {
                 d.vendor = vendor;
             }
         }
+        if let (Some(gw), Some((_, mac))) = (gw, found_gw) {
+            self.check_gateway(&gw.to_string(), &mac);
+        }
         let mut s = self.lock();
-        s.online = online;
+        let previous = std::mem::replace(&mut s.online, online);
         s.scanning = false;
         s.gateway = gw.map(|g| g.to_string());
         s.local_ip = me_ip.map(|g| g.to_string());
@@ -385,6 +566,23 @@ impl Monitor {
                 s.store.add_event(EventKind::NewDevice, None, format!("{label} ({mac})"));
                 if s.store.data.settings.notifications && s.store.data.settings.notify_devices {
                     notify(&format!("New device joined your network: {label}"));
+                }
+            }
+            // Known devices coming and going (previous is empty on the first scan).
+            if s.store.data.settings.notify_device_presence && !previous.is_empty() {
+                let label = |s: &Shared, mac: &str| {
+                    s.store.data.devices.get(mac).map(|d| d.label.clone().or(d.name.clone()).unwrap_or_else(|| d.ip.clone())).unwrap_or_default()
+                };
+                let joined: Vec<String> = s.online.iter().filter(|m| !previous.contains(*m) && s.store.data.devices[*m].first_seen != t).cloned().collect();
+                let left: Vec<String> = previous.iter().filter(|m| !s.online.contains(*m)).cloned().collect();
+                for (macs, kind, verb) in [(joined, EventKind::DeviceJoined, "joined"), (left, EventKind::DeviceLeft, "left")] {
+                    for mac in macs {
+                        let l = label(&s, &mac);
+                        s.store.add_event(kind, None, format!("{l} ({mac})"));
+                        if s.store.data.settings.notifications && s.store.data.settings.notify_devices {
+                            notify(&format!("{l} {verb} your network"));
+                        }
+                    }
                 }
             }
         }
@@ -417,6 +615,7 @@ impl Monitor {
         let mut est = [0u64; 4];
         let mut est_bytes = [0u64; 2]; // attributed vs interface total since last report
         let mut last_report = Instant::now();
+        let mut rdp_seen: HashSet<IpAddr> = HashSet::new();
 
         loop {
             next += Duration::from_secs(1);
@@ -459,8 +658,14 @@ impl Monitor {
             let mut next_stats = HashMap::new();
             let mut first_contacts: Vec<(String, IpAddr)> = Vec::new();
 
-            let names_snapshot = { self.lock().names.clone() };
+            let (names_snapshot, dns_lookup, monitor_rdp, notify_on) = {
+                let s = self.lock();
+                let st = &s.store.data.settings;
+                SNOOZE_UNTIL.store(st.snooze_until.unwrap_or(0), Ordering::Relaxed);
+                (s.names.clone(), st.dns_lookup, st.monitor_rdp, st.notifications)
+            };
             let mut to_resolve = Vec::new();
+            let mut rdp_now: HashSet<IpAddr> = HashSet::new();
 
             for c in &conns {
                 if c.pid == 0 {
@@ -499,6 +704,9 @@ impl Monitor {
                     to_resolve.push(c.remote);
                 }
                 let inbound = remote_real && listening.contains(&c.local_port);
+                if inbound && c.local_port == RDP_PORT && c.state == TcpState::Established {
+                    rdp_now.insert(c.remote);
+                }
                 let entry = apps_live.entry(key.clone()).or_default();
                 if remote_real {
                     if inbound { entry.in_conns += 1 } else { entry.out_conns += 1 }
@@ -524,6 +732,12 @@ impl Monitor {
                 entry.conns.push(view(c, host, rate, total, inbound));
             }
             stats = next_stats;
+            if !dns_lookup {
+                to_resolve.clear();
+            }
+            // One RDP event per remote address per session it stays connected.
+            let rdp_new: Vec<IpAddr> = rdp_now.iter().filter(|ip| !rdp_seen.contains(ip)).copied().collect();
+            rdp_seen = rdp_now;
 
             est_bytes[0] += attributed[0] + attributed[1];
             est_bytes[1] += total_down + total_up;
@@ -576,6 +790,7 @@ impl Monitor {
             }
 
             // --- publish
+            let mut asks: Vec<String> = Vec::new();
             {
                 let mut guard = self.lock();
                 let s = &mut *guard;
@@ -627,6 +842,14 @@ impl Monitor {
                         rec.name = meta.name.clone();
                     }
                 }
+                if monitor_rdp {
+                    for ip in rdp_new {
+                        s.store.add_event(EventKind::Rdp, None, ip.to_string());
+                        if notify_on {
+                            notify(&format!("Remote Desktop connection from {ip}"));
+                        }
+                    }
+                }
                 let quiet = quiet_until.map(|q| Instant::now() < q).unwrap_or(false);
                 for (key, ip) in first_contacts {
                     let host = s.host_label(&ip);
@@ -637,6 +860,10 @@ impl Monitor {
                     if rec.first_net.is_none() {
                         rec.first_net = Some(t);
                         if !quiet {
+                            if settings.firewall_mode == FirewallMode::AskToConnect && settings.firewall_enabled && !s.asks.contains(&key) {
+                                s.asks.push(key.clone());
+                                asks.push(key.clone());
+                            }
                             s.store.add_event(EventKind::NewApp, Some(key.clone()), host.clone());
                             if settings.notifications && settings.notify_new_apps {
                                 notify(&format!("{name} initiated its first network connection to {host}"));
@@ -651,14 +878,14 @@ impl Monitor {
                 while s.live.len() > LIVE_SECONDS {
                     s.live.pop_front();
                 }
-                let today = s.store.add_usage(t, [total_down, total_up, lan[0], lan[1]], &per_app, &per_host);
+                s.store.add_usage(t, [total_down, total_up, lan[0], lan[1]], &per_app, &per_host);
                 let cap = s.store.data.settings.daily_cap_mb * 1_000_000;
-                let day = chrono::Local::now().format("%Y-%m-%d").to_string();
-                if cap > 0 && today[0] + today[1] >= cap && s.store.data.cap_alerted.as_deref() != Some(&day) {
-                    s.store.data.cap_alerted = Some(day);
+                let (used, period) = s.store.plan_usage();
+                if cap > 0 && used >= cap && s.store.data.cap_alerted.as_deref() != Some(&period) {
+                    s.store.data.cap_alerted = Some(period);
                     s.store.add_event(EventKind::DataCap, None, format!("{} MB", s.store.data.settings.daily_cap_mb));
                     if s.store.data.settings.notifications {
-                        notify("You have reached your daily data usage limit.");
+                        notify("You have reached your data plan limit.");
                     }
                 }
                 s.apps_live = apps_live;
@@ -681,6 +908,13 @@ impl Monitor {
                 if last_save.elapsed() > Duration::from_secs(30) {
                     s.store.save();
                     last_save = Instant::now();
+                }
+            }
+            for key in asks {
+                self.set_block(&key, Dir::Out, true);
+                let name = self.lock().app_name(&key);
+                if notify_on {
+                    notify(&format!("{name} wants to connect to the internet. It is blocked until you allow it in Vantage."));
                 }
             }
             repaint();
@@ -746,6 +980,9 @@ fn resolve(pid: u32, exe: &str, checked: &mut HashSet<String>) -> (String, Optio
 }
 
 fn notify(body: &str) {
+    if store::now() < SNOOZE_UNTIL.load(Ordering::Relaxed) {
+        return;
+    }
     let body = body.to_string();
     std::thread::spawn(move || {
         let _ = notify_rust::Notification::new().summary("Vantage").body(&body).show();

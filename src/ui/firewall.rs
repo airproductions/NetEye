@@ -8,7 +8,11 @@ use super::theme::{self, c, Glyph, Icons};
 use super::Action;
 use crate::monitor::{ConnView, Shared, OTHER_KEY, SYSTEM_KEY};
 use crate::net::Proto;
+use crate::store::{FirewallMode, Profile};
 use crate::system::Dir;
+
+const MODES: [FirewallMode; 3] = [FirewallMode::ClickToBlock, FirewallMode::AskToConnect, FirewallMode::BlockAll];
+const MODE_NAMES: [&str; 3] = ["Click to Block", "Ask to Connect", "Block All"];
 
 const ROW_H: f32 = 38.0;
 const SUB_H: f32 = 28.0;
@@ -19,6 +23,8 @@ pub struct FirewallPage {
     expanded: HashSet<String>,
     hide_inactive: bool,
     hide_active: bool,
+    /// Name being typed for a new profile, while the save field is open.
+    new_profile: Option<String>,
 }
 
 struct Cols {
@@ -142,7 +148,7 @@ impl FirewallPage {
         });
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, s: &Shared, actions: &mut Vec<Action>, full: Rect) {
+    fn toolbar(&mut self, ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>, full: Rect) {
         let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 96.0), Sense::hover());
         theme::glass(ui.painter(), Rect::from_min_max(Pos2::new(bar.left() + 16.0, bar.top() + 4.0), Pos2::new(bar.right() - 16.0, bar.bottom() - 4.0)), 14);
         let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(44.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -161,13 +167,32 @@ impl FirewallPage {
         sep(&mut b);
         b.add_space(28.0);
         b.vertical(|ui| {
-            title(ui, Glyph::Lock, "Click to block", "Click an Allowed or Blocked pill in the table to toggle that direction for an app.");
             let engine = match &s.firewall_product {
-                Some(p) if !p.to_lowercase().contains("windows") => format!("Enforced at the filtering layer · works alongside {p}"),
-                _ => "Enforced at the Windows filtering layer".to_string(),
+                Some(p) if !p.to_lowercase().contains("windows") => format!("Enforced at the Windows filtering layer, alongside {p}."),
+                _ => "Enforced at the Windows filtering layer.".to_string(),
             };
-            theme::label(ui, engine, theme::regular(13.0), c::muted())
-                .on_hover_text("Blocks are Windows Filtering Platform filters, which apply no matter which firewall product is active. They persist across reboots.");
+            title(
+                ui,
+                Glyph::Lock,
+                "Firewall mode",
+                &format!(
+                    "Click to Block: everything is allowed until you block it.\nAsk to Connect: apps connecting for the first time are blocked until you allow them.\nBlock All: every outgoing connection is blocked.\n{engine}"
+                ),
+            );
+            let mode = s.store.data.settings.firewall_mode;
+            let mut sel = MODES.iter().position(|m| *m == mode).unwrap_or(0);
+            ui.add_enabled_ui(!s.firewall_busy, |ui| {
+                if theme::dropdown(ui, "fw-mode", &MODE_NAMES, &mut sel) {
+                    actions.push(Action::FirewallMode(MODES[sel]));
+                }
+            });
+        });
+        b.add_space(28.0);
+        sep(&mut b);
+        b.add_space(28.0);
+        b.vertical(|ui| {
+            title(ui, Glyph::Shield, "Profile", "Saved sets of block rules. Pick a profile to apply its rules; apps it doesn't list are allowed.");
+            ui.horizontal(|ui| self.profiles(ui, s, actions));
         });
         b.add_space(28.0);
         sep(&mut b);
@@ -185,6 +210,59 @@ impl FirewallPage {
                 theme::label(ui, "Applying…", theme::regular(13.0), c::muted());
             }
         });
+    }
+
+    fn profiles(&mut self, ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
+        if let Some(name) = self.new_profile.as_mut() {
+            let r = ui.add(egui::TextEdit::singleline(name).hint_text("Profile name").desired_width(140.0).font(theme::regular(13.5)));
+            if !r.lost_focus() {
+                r.request_focus();
+            }
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let name = name.trim().to_string();
+            if (theme::primary_button(ui, "Save").clicked() || enter) && !name.is_empty() {
+                // Snapshot of the current rules
+                let profile: Profile = s.store.data.apps.iter().filter(|(_, a)| a.block_in || a.block_out).map(|(k, a)| (k.clone(), (a.block_in, a.block_out))).collect();
+                s.store.data.profiles.insert(name.clone(), profile);
+                s.store.data.active_profile = Some(name.clone());
+                s.store.mark_dirty();
+                s.toast = Some(format!("Saved firewall profile \"{name}\""));
+                self.new_profile = None;
+            } else if theme::pill(ui, "Cancel", None, false).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.new_profile = None;
+            }
+            return;
+        }
+        let names: Vec<String> = s.store.data.profiles.keys().cloned().collect();
+        if !names.is_empty() {
+            let mut options = vec!["No profile".to_string()];
+            options.extend(names.iter().cloned());
+            let refs: Vec<&str> = options.iter().map(String::as_str).collect();
+            let mut sel = s.store.data.active_profile.as_ref().and_then(|a| names.iter().position(|n| n == a)).map(|i| i + 1).unwrap_or(0);
+            ui.add_enabled_ui(!s.firewall_busy, |ui| {
+                if theme::dropdown(ui, "fw-profile", &refs, &mut sel) {
+                    if sel == 0 {
+                        s.store.data.active_profile = None;
+                        s.store.mark_dirty();
+                    } else {
+                        actions.push(Action::ApplyProfile(names[sel - 1].clone()));
+                    }
+                }
+            });
+        }
+        if theme::pill(ui, if names.is_empty() { "Save current rules…" } else { "Save…" }, None, false)
+            .on_hover_text("Save the current block rules as a profile")
+            .clicked()
+        {
+            self.new_profile = Some(String::new());
+        }
+        if let Some(active) = s.store.data.active_profile.clone() {
+            if theme::pill(ui, "Delete", None, false).on_hover_text(format!("Delete profile \"{active}\" (rules stay as they are)")).clicked() {
+                s.store.data.profiles.remove(&active);
+                s.store.data.active_profile = None;
+                s.store.mark_dirty();
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

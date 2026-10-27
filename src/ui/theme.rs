@@ -130,7 +130,28 @@ pub fn bytes(b: u64) -> String {
     }
 }
 
+static SPEED_BITS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Shows speeds in bits per second (Settings → Speed units).
+pub fn set_speed_bits(on: bool) {
+    SPEED_BITS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn rate(b: f64) -> String {
+    if SPEED_BITS.load(std::sync::atomic::Ordering::Relaxed) {
+        let b = b * 8.0;
+        return if b < 1.0 {
+            "0 bps".into()
+        } else if b < 1000.0 {
+            format!("{b:.0} bps")
+        } else if b < 1e6 {
+            format!("{:.0} Kbps", b / 1e3)
+        } else if b < 1e9 {
+            format!("{:.1} Mbps", b / 1e6)
+        } else {
+            format!("{:.2} Gbps", b / 1e9)
+        };
+    }
     if b < 1.0 {
         return "0 B/s".into();
     }
@@ -500,6 +521,7 @@ pub fn dropdown(ui: &mut Ui, id: &str, options: &[&str], selected: &mut usize) -
     egui::ComboBox::from_id_salt(id)
         .selected_text(egui::RichText::new(options[*selected]).font(semibold(13.5)))
         .width(0.0)
+        .height(440.0)
         .show_ui(ui, |ui| {
             for (i, o) in options.iter().enumerate() {
                 ui.selectable_value(selected, i, *o);

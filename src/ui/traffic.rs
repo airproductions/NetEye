@@ -579,8 +579,20 @@ impl TrafficPage {
             })
             .unwrap_or((0, 0));
         let total = [series.down.iter().sum::<f64>() as u64, series.up.iter().sum::<f64>() as u64];
-        let today = s.store.data.daily.get(&chrono::Local::now().format("%Y-%m-%d").to_string()).copied().unwrap_or([0, 0]);
+        let mut today = s.store.data.daily.get(&chrono::Local::now().format("%Y-%m-%d").to_string()).copied().unwrap_or([0, 0]);
         let cap = s.store.data.settings.daily_cap_mb.saturating_mul(1_000_000);
+        let period = match s.store.data.settings.plan_period {
+            store::PlanPeriod::Day => "today",
+            store::PlanPeriod::Week => "this week",
+            store::PlanPeriod::Month => "this month",
+        };
+        if cap > 0 {
+            // Plan usage, split down/up by today's ratio so the arc keeps both colours.
+            let (used, _) = s.store.plan_usage();
+            let t = (today[0] + today[1]).max(1) as f64;
+            let down = (used as f64 * today[0] as f64 / t) as u64;
+            today = if today == [0, 0] { [used, 0] } else { [down, used - down.min(used)] };
+        }
 
         let big = theme::bold(17.0);
         let small = theme::regular(12.0);
@@ -638,7 +650,8 @@ impl TrafficPage {
         p.text(Pos2::new(gc.x, gc.y - 22.0), Align2::CENTER_CENTER, theme::bytes(num("today", (today[0] + today[1]) as f64) as u64), theme::bold(14.0), c::text());
         let sub = if cap > 0 { format!("of {}", theme::bytes(cap)) } else { "today".to_string() };
         p.text(Pos2::new(gc.x, gc.y - 5.0), Align2::CENTER_CENTER, sub, theme::regular(11.0), c::muted());
-        ui.interact(gr, id.with("gaugetip"), Sense::hover()).on_hover_text(if cap > 0 { "Today's usage against the daily cap" } else { "Today's usage, download and upload" });
+        let tip = if cap > 0 { format!("Usage {period} against your data plan") } else { "Today's usage, download and upload".to_string() };
+        ui.interact(gr, id.with("gaugetip"), Sense::hover()).on_hover_text(tip);
         x = gr.right() + 14.0;
 
         arrow(x, Glyph::Up, c::up());

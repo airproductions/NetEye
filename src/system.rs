@@ -40,12 +40,24 @@ pub fn apply_firewall(changes: &[(String, Dir, bool)], admin: bool, close_open: 
     if admin {
         return crate::wfp::apply(changes, close_open);
     }
-    let batch = std::env::temp_dir().join(format!("vantage-fw-{}.txt", std::process::id()));
     let body: String = changes
         .iter()
         .map(|(p, d, b)| format!("{}\t{}\t{}\n", if *b { 1 } else { 0 }, if *d == Dir::In { "in" } else { "out" }, p))
         .collect();
-    let body = format!("#close_open={}\n{body}", close_open as u8);
+    elevated_batch(&format!("#close_open={}\n{body}", close_open as u8), changes.len())
+}
+
+/// Turns the "Block All" filter (every outgoing connection except loopback) on or off.
+pub fn set_block_all(on: bool, admin: bool) -> Result<(), String> {
+    if admin {
+        return crate::wfp::block_all(on);
+    }
+    elevated_batch(&format!("#close_open=0\n#block_all={}\n", on as u8), 1)
+}
+
+/// Runs `vantage.exe --fw-batch` elevated on a batch file holding `body` (one UAC prompt).
+fn elevated_batch(body: &str, count: usize) -> Result<(), String> {
+    let batch = std::env::temp_dir().join(format!("vantage-fw-{}.txt", std::process::id()));
     std::fs::write(&batch, body).map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let q = |s: &str| s.replace('\'', "''");
@@ -57,7 +69,7 @@ pub fn apply_firewall(changes: &[(String, Dir, bool)], admin: bool, close_open: 
     let out = powershell(&script).map_err(|e| e.to_string());
     let _ = std::fs::remove_file(&batch);
     let out = out?;
-    crate::diag::log(&format!("elevated firewall batch ({} changes) -> {}", changes.len(), out.status));
+    crate::diag::log(&format!("elevated firewall batch ({count} changes) -> {}", out.status));
     if String::from_utf8_lossy(&out.stdout).contains("cancelled") {
         return Err("Administrator permission was declined.".into());
     }
@@ -71,6 +83,14 @@ pub fn apply_firewall(changes: &[(String, Dir, bool)], admin: bool, close_open: 
 pub fn run_firewall_batch(file: &str) -> i32 {
     let Ok(text) = std::fs::read_to_string(file.trim_matches('"')) else { return 2 };
     let close_open = !text.contains("#close_open=0");
+    for (tag, on) in [("#block_all=1", true), ("#block_all=0", false)] {
+        if text.contains(tag) {
+            if let Err(e) = crate::wfp::block_all(on) {
+                crate::diag::log(&format!("block-all batch failed: {e}"));
+                return 1;
+            }
+        }
+    }
     let changes: Vec<(String, Dir, bool)> = text
         .lines()
         .filter(|l| !l.starts_with('#'))
@@ -204,6 +224,11 @@ fn as_ipaddr(ip: Ipv4Addr) -> u32 {
     u32::from_ne_bytes(ip.octets())
 }
 
+/// MAC address that answers ARP for `ip`, asked from our LAN address.
+pub fn arp(lan: &Lan, ip: Ipv4Addr) -> Option<String> {
+    send_arp(ip, lan.ip)
+}
+
 fn send_arp(ip: Ipv4Addr, src: Ipv4Addr) -> Option<String> {
     let mut mac = [0u8; 8];
     let mut len: u32 = 6;
@@ -237,6 +262,84 @@ pub fn scan_subnet(lan: &Lan) -> Vec<(Ipv4Addr, String)> {
     let mut v = results.into_inner().unwrap();
     v.sort_by_key(|(ip, _)| ip.octets());
     v
+}
+
+/// DNS servers Windows is configured to use, in order.
+pub fn dns_servers() -> Vec<String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetNetworkParams, FIXED_INFO_W2KSP1, IP_ADDR_STRING};
+    let mut size: u32 = 0;
+    unsafe { GetNetworkParams(std::ptr::null_mut(), &mut size) };
+    if size == 0 {
+        return Vec::new();
+    }
+    // u64 backing keeps the struct's pointers aligned
+    let mut buf = vec![0u64; size as usize / 8 + 1];
+    if unsafe { GetNetworkParams(buf.as_mut_ptr() as *mut FIXED_INFO_W2KSP1, &mut size) } != 0 {
+        return Vec::new();
+    }
+    let info = unsafe { &*(buf.as_ptr() as *const FIXED_INFO_W2KSP1) };
+    let mut out = Vec::new();
+    let mut node: *const IP_ADDR_STRING = &info.DnsServerList;
+    while !node.is_null() {
+        let n = unsafe { &*node };
+        let raw: Vec<u8> = n.IpAddress.String.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+        let ip = String::from_utf8_lossy(&raw).to_string();
+        if !ip.is_empty() {
+            out.push(ip);
+        }
+        node = n.Next;
+    }
+    out
+}
+
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const INET_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+fn reg_string(key: &str, value: &str) -> Option<String> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+    let (k, v) = (crate::net::wide(key), crate::net::wide(value));
+    let mut buf = vec![0u16; 1024];
+    let mut size = (buf.len() * 2) as u32;
+    let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buf.as_mut_ptr() as *mut _, &mut size) };
+    if rc != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]))
+}
+
+fn reg_dword(key: &str, value: &str) -> Option<u32> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let (k, v) = (crate::net::wide(key), crate::net::wide(value));
+    let mut d: u32 = 0;
+    let mut size = 4u32;
+    let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), &mut d as *mut u32 as *mut _, &mut size) };
+    (rc == 0).then_some(d)
+}
+
+/// The current user's proxy configuration as one comparable line ("off" when none is set).
+pub fn proxy_settings() -> String {
+    let mut parts = Vec::new();
+    if reg_dword(INET_KEY, "ProxyEnable").unwrap_or(0) != 0 {
+        parts.push(format!("proxy {}", reg_string(INET_KEY, "ProxyServer").unwrap_or_default()));
+    }
+    if let Some(pac) = reg_string(INET_KEY, "AutoConfigURL").filter(|s| !s.is_empty()) {
+        parts.push(format!("script {pac}"));
+    }
+    if parts.is_empty() { "off".into() } else { parts.join(", ") }
+}
+
+/// Adds or removes Vantage from the current user's startup programs.
+pub fn set_run_on_startup(on: bool) -> bool {
+    use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+    let (k, v) = (crate::net::wide(RUN_KEY), crate::net::wide("Vantage"));
+    if !on {
+        let rc = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr()) };
+        return rc == 0 || rc == 2; // ERROR_FILE_NOT_FOUND: already gone
+    }
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let cmd = crate::net::wide(&format!("\"{}\"", exe.display()));
+    unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), REG_SZ, cmd.as_ptr() as *const _, (cmd.len() * 2) as u32) == 0 }
 }
 
 pub fn reverse_dns(ip: IpAddr) -> Option<String> {

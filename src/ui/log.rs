@@ -9,13 +9,28 @@ use super::theme::{self, c, Glyph, Icons};
 use crate::monitor::Shared;
 use crate::store::{Event, EventKind};
 
-const FILTERS: [&str; 2] = ["Important", "Everything"];
+/// Alert types the filter can narrow to, by their `EventKind::source` name.
+const TYPES: [&str; 11] = [
+    "First network activity",
+    "Internet access monitor",
+    "Application info monitor",
+    "Network scanner",
+    "Device list monitor",
+    "ARP spoofing detection",
+    "DNS server settings monitor",
+    "Proxy settings monitor",
+    "RDP detection",
+    "Data usage monitor",
+    "Firewall",
+];
+const SORTS: [&str; 3] = ["Sort by date", "Sort by type", "Sort by app"];
 const PERIODS: [&str; 4] = ["All time", "Today", "Last 7 days", "Last 30 days"];
 const ROW_H: f32 = 78.0;
 
 #[derive(Default)]
 pub struct LogPage {
     filter: usize,
+    sort: usize,
     period: usize,
     search: String,
     fresh: Option<HashSet<u64>>,
@@ -38,8 +53,21 @@ impl LogPage {
         let card = bar.shrink2(Vec2::new(16.0, 4.0));
         theme::glass(ui.painter(), card, 14);
         let mut b = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink2(Vec2::new(16.0, 8.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        // Important, everything, then one entry per alert type, each with its count.
+        let all = &s.store.data.events;
+        let types = TYPES;
+        let mut labels = vec![
+            format!("Important  {}", all.iter().filter(|e| e.kind.important()).count()),
+            format!("All alerts  {}", all.len()),
+        ];
+        for t in &types {
+            labels.push(format!("{t}  {}", all.iter().filter(|e| e.kind.source() == *t).count()));
+        }
+        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         prefix_glyph(&mut b, Glyph::Bell, "Which events to show");
-        theme::dropdown(&mut b, "log-filter", &FILTERS, &mut self.filter);
+        theme::dropdown(&mut b, "log-filter", &label_refs, &mut self.filter);
+        b.add_space(10.0);
+        theme::dropdown(&mut b, "log-sort", &SORTS, &mut self.sort);
         b.add_space(10.0);
         prefix_glyph(&mut b, Glyph::Clock, "Time period");
         theme::dropdown(&mut b, "log-period", &PERIODS, &mut self.period);
@@ -70,7 +98,14 @@ impl LogPage {
             .data
             .events
             .iter()
-            .filter(|e| e.t >= min_t && (self.filter == 1 || e.kind.important()))
+            .filter(|e| {
+                e.t >= min_t
+                    && match self.filter {
+                        0 => e.kind.important(),
+                        1 => true,
+                        n => types.get(n - 2).is_some_and(|t| e.kind.source() == *t),
+                    }
+            })
             .filter(|e| {
                 q.is_empty() || {
                     let app = e.app.as_ref().map(|a| s.app_name(a)).unwrap_or_default();
@@ -79,6 +114,17 @@ impl LogPage {
             })
             .cloned()
             .collect();
+        let mut events = events;
+        // Days stay in order; within a day, optionally group by alert type or app.
+        if self.sort > 0 {
+            let day = |e: &Event| std::cmp::Reverse(theme::local(e.t).date_naive());
+            if self.sort == 1 {
+                events.sort_by(|a, b| day(a).cmp(&day(b)).then_with(|| a.kind.source().cmp(b.kind.source())).then(b.t.cmp(&a.t)));
+            } else {
+                let app = |e: &Event| e.app.as_ref().map(|k| s.app_name(k).to_lowercase()).unwrap_or_else(|| "\u{ffff}".into());
+                events.sort_by(|a, b| day(a).cmp(&day(b)).then_with(|| app(a).cmp(&app(b))).then(b.t.cmp(&a.t)));
+            }
+        }
 
         if events.is_empty() {
             let p = ui.painter_at(full);
@@ -154,7 +200,13 @@ fn describe(k: EventKind) -> &'static str {
         EventKind::VersionChanged => "version changed",
         EventKind::NewDevice => "New device joined your network:",
         EventKind::Firewall => "firewall",
-        EventKind::DataCap => "Daily data usage limit reached",
+        EventKind::DataCap => "Data plan limit reached",
+        EventKind::DeviceLeft => "Device left your network:",
+        EventKind::DeviceJoined => "Device rejoined your network:",
+        EventKind::ArpSpoof => "Possible ARP spoofing: your router's MAC address changed",
+        EventKind::DnsChanged => "DNS servers changed to",
+        EventKind::ProxyChanged => "Proxy settings changed:",
+        EventKind::Rdp => "Remote Desktop connection from",
     }
 }
 
@@ -171,7 +223,10 @@ fn segments(e: &Event) -> Vec<(String, bool)> {
             let lead = if e.app.is_some() { format!(" — {}.", e.subject.to_lowercase()) } else { format!("{}.", e.subject) };
             vec![(lead, false)]
         }
-        EventKind::DataCap => vec![("You reached your daily data usage limit of ".into(), false), (format!("{}.", e.subject), true)],
+        EventKind::DataCap => vec![("You reached your data plan limit of ".into(), false), (format!("{}.", e.subject), true)],
+        EventKind::DeviceLeft | EventKind::DeviceJoined | EventKind::ArpSpoof | EventKind::DnsChanged | EventKind::ProxyChanged | EventKind::Rdp => {
+            vec![(format!("{} ", describe(e.kind)), false), (e.subject.clone(), true)]
+        }
     }
 }
 
@@ -194,6 +249,11 @@ fn badge(p: &egui::Painter, center: Pos2, kind: EventKind) {
         EventKind::NewDevice => (c::accent(), Some(Glyph::Scanner), None),
         EventKind::Firewall => (Color32::from_rgb(0x64, 0x6c, 0x7c), Some(Glyph::Shield), None),
         EventKind::DataCap => (c::bad(), Some(Glyph::Info), None),
+        EventKind::DeviceLeft => (Color32::from_rgb(0x64, 0x6c, 0x7c), Some(Glyph::Scanner), None),
+        EventKind::DeviceJoined => (c::accent(), Some(Glyph::Scanner), None),
+        EventKind::ArpSpoof => (c::bad(), Some(Glyph::Shield), None),
+        EventKind::DnsChanged | EventKind::ProxyChanged => (c::warn(), Some(Glyph::Globe), None),
+        EventKind::Rdp => (c::orange(), Some(Glyph::Computer), None),
     };
     p.circle_filled(center, 20.0, col);
     if let Some(g) = g {

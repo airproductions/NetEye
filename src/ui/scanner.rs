@@ -13,6 +13,8 @@ const ROW_H: f32 = 64.0;
 #[derive(Default)]
 pub struct ScannerPage {
     search: String,
+    /// (mac, text) of the device being renamed.
+    editing: Option<(String, String)>,
 }
 
 fn kind(d: &DeviceRecord, gateway: Option<&str>, local: Option<&str>) -> (Glyph, &'static str) {
@@ -105,7 +107,7 @@ impl ScannerPage {
             .data
             .devices
             .values()
-            .filter(|d| q.is_empty() || format!("{} {} {} {}", d.name.clone().unwrap_or_default(), d.vendor.clone().unwrap_or_default(), d.ip, d.mac).to_lowercase().contains(&q))
+            .filter(|d| q.is_empty() || format!("{} {} {} {} {}", d.label.clone().unwrap_or_default(), d.name.clone().unwrap_or_default(), d.vendor.clone().unwrap_or_default(), d.ip, d.mac).to_lowercase().contains(&q))
             .cloned()
             .collect();
         devices.sort_by_key(|d| (!s.online.contains(&d.mac), d.ip.split('.').map(|o| o.parse::<u32>().unwrap_or(0)).fold(0u32, |a, o| a * 256 + o)));
@@ -139,10 +141,37 @@ impl ScannerPage {
                 p.circle_stroke(ir.center(), 17.0, Stroke::new(1.0_f32, c::border()));
                 theme::glyph(p, ir.shrink(5.0), g, if online { c::text() } else { c::muted() });
                 ui.interact(ir, ui.id().with(("kind", i)), Sense::hover()).on_hover_text(kname);
-                let p = ui.painter();
                 let tc = if online { c::text() } else { c::muted() };
-                let name = d.name.clone().unwrap_or_else(|| kname.to_string());
-                theme::text(p, Pos2::new(cols[2], y), &name, theme::semibold(14.0), tc, cols[3] - cols[2] - 12.0);
+                let name = d.label.clone().or(d.name.clone()).unwrap_or_else(|| kname.to_string());
+                let nr = Rect::from_min_max(Pos2::new(cols[2] - 4.0, y - 14.0), Pos2::new(cols[3] - 12.0, y + 14.0));
+                match self.editing.as_mut().filter(|(mac, _)| *mac == d.mac) {
+                    Some((mac, text)) => {
+                        let r = ui.put(nr, egui::TextEdit::singleline(text).font(theme::semibold(14.0)).hint_text("Device name"));
+                        r.request_focus();
+                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            self.editing = None;
+                        } else if r.lost_focus() {
+                            let label = text.trim().to_string();
+                            if let Some(dev) = s.store.data.devices.get_mut(mac.as_str()) {
+                                dev.label = (!label.is_empty()).then_some(label);
+                                s.store.mark_dirty();
+                            }
+                            self.editing = None;
+                        }
+                    }
+                    None => {
+                        let p = ui.painter();
+                        theme::text(p, Pos2::new(cols[2], y), &name, theme::semibold(14.0), tc, cols[3] - cols[2] - 12.0);
+                        let tip = match &d.name {
+                            Some(n) if d.label.is_some() => format!("Double-click to rename (discovered as {n})"),
+                            _ => "Double-click to rename".to_string(),
+                        };
+                        if ui.interact(nr, ui.id().with(("name", i)), Sense::click()).on_hover_text(tip).double_clicked() {
+                            self.editing = Some((d.mac.clone(), d.label.clone().or(d.name.clone()).unwrap_or_default()));
+                        }
+                    }
+                }
+                let p = ui.painter();
                 theme::text(p, Pos2::new(cols[3], y), d.vendor.as_deref().unwrap_or("Unknown vendor"), theme::regular(13.5), c::muted(), cols[4] - cols[3] - 12.0);
                 theme::text(p, Pos2::new(cols[4], y), &d.ip, theme::regular(13.5), tc, cols[5] - cols[4] - 8.0);
                 theme::text(p, Pos2::new(cols[5], y), &d.mac.to_uppercase(), theme::regular(13.5), tc, cols[6] - cols[5] - 8.0);

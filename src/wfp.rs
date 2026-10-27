@@ -11,7 +11,7 @@ use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteByKey0, FwpmFilterGetByKey0, FwpmFreeMemory0,
     FwpmGetAppIdFromFileName0, FwpmSubLayerAdd0, FWPM_CONDITION_ALE_APP_ID, FWPM_FILTER0, FWPM_FILTER_CONDITION0,
     FWPM_FILTER_FLAG_PERSISTENT, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
-    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_SUBLAYER0, FWPM_SUBLAYER_FLAG_PERSISTENT,
+    FWPM_CONDITION_FLAGS, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWP_CONDITION_FLAG_IS_LOOPBACK, FWP_MATCH_FLAGS_NONE_SET, FWP_UINT32, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_SUBLAYER0, FWPM_SUBLAYER_FLAG_PERSISTENT,
     FWP_ACTION_BLOCK, FWP_BYTE_BLOB, FWP_BYTE_BLOB_TYPE, FWP_MATCH_EQUAL, FWP_UINT8,
 };
 
@@ -21,6 +21,7 @@ use crate::system::Dir;
 const RPC_C_AUTHN_WINNT: u32 = 10;
 const FWP_E_ALREADY_EXISTS: u32 = 0x8032_0009;
 const FWP_E_FILTER_NOT_FOUND: u32 = 0x8032_0003;
+const BLOCK_ALL: [GUID; 2] = [GUID::from_u128(0x5a1c7e3b_2d4f_4b8e_9c61_0f3e7a2b9d21), GUID::from_u128(0x5a1c7e3b_2d4f_4b8e_9c61_0f3e7a2b9d22)];
 const SUBLAYER: GUID = GUID::from_u128(0x5a1c7e3b_2d4f_4b8e_9c61_0f3e7a2b9d10);
 
 fn layers(dir: Dir) -> [(usize, GUID); 2] {
@@ -160,6 +161,43 @@ pub fn apply(changes: &[(String, Dir, bool)], close_open: bool) -> Result<(), St
         crate::diag::log(&format!("wfp {} {:?} {program} -> {:?}", if *block { "block" } else { "unblock" }, dir, r));
         r?;
     }
+    Ok(())
+}
+
+/// Adds or removes the persistent "Block All" filters: every outgoing connection except
+/// loopback, for all programs.
+pub fn block_all(on: bool) -> Result<(), String> {
+    let engine = Engine::open()?;
+    engine.ensure_sublayer()?;
+    for (key, layer) in BLOCK_ALL.iter().zip([FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6]) {
+        unsafe { FwpmFilterDeleteByKey0(engine.0, key) };
+        if !on {
+            continue;
+        }
+        let name = wide("Vantage block all outgoing");
+        let mut cond: FWPM_FILTER_CONDITION0 = unsafe { std::mem::zeroed() };
+        cond.fieldKey = FWPM_CONDITION_FLAGS;
+        cond.matchType = FWP_MATCH_FLAGS_NONE_SET;
+        cond.conditionValue.r#type = FWP_UINT32;
+        cond.conditionValue.Anonymous.uint32 = FWP_CONDITION_FLAG_IS_LOOPBACK;
+        let mut f: FWPM_FILTER0 = unsafe { std::mem::zeroed() };
+        f.filterKey = *key;
+        f.displayData.name = name.as_ptr() as *mut u16;
+        f.flags = FWPM_FILTER_FLAG_PERSISTENT;
+        f.layerKey = layer;
+        f.subLayerKey = SUBLAYER;
+        f.weight.r#type = FWP_UINT8;
+        f.weight.Anonymous.uint8 = 14;
+        f.numFilterConditions = 1;
+        f.filterCondition = &mut cond;
+        f.action.r#type = FWP_ACTION_BLOCK;
+        let mut id = 0u64;
+        let rc = unsafe { FwpmFilterAdd0(engine.0, &f, null_mut(), &mut id) };
+        if rc != 0 && rc != FWP_E_ALREADY_EXISTS {
+            return Err(format!("could not add the block-all filter (0x{rc:08x})"));
+        }
+    }
+    crate::diag::log(&format!("wfp block all -> {on}"));
     Ok(())
 }
 
