@@ -105,6 +105,41 @@ pub fn x_from_offset(offset: usize, strip: Rect, max_offset: usize, window: usiz
     strip.right() - strip.width() * offset.min(max_offset) as f32 / total
 }
 
+/// Scrubber: the time span `(t0, t1)` the strip covers, `t1` exclusive at the right edge (the
+/// live window's end) and `t0 = t1 - (max_offset + window) * step` at the left, so it matches the
+/// step-linear `offset_from_x` / `x_from_offset`. `times` are the shown window's step starts,
+/// already shifted back by `end_offset` (clamped to `max_offset`).
+pub fn scrub_range(times: &[i64], step: i64, end_offset: usize, max_offset: usize) -> Option<(i64, i64)> {
+    let last = *times.last()?;
+    if step <= 0 {
+        return None;
+    }
+    let off = end_offset.min(max_offset) as i64;
+    let t1 = last + step + off * step;
+    let t0 = t1 - (max_offset + times.len()) as i64 * step;
+    Some((t0, t1))
+}
+
+/// Scrubber: the sparse `history` placed by time over `[t0, t1)` in `bins` equal slots, keeping
+/// each slot's peak; slots with no stored bucket (the PC or app was off) are 0. Entries before
+/// `t0` fall in the first slot, entries at or after `t1` are dropped.
+pub fn history_bins(history: &[(i64, f64)], t0: i64, t1: i64, bins: usize) -> Vec<f64> {
+    let mut out = vec![0.0; bins];
+    if bins == 0 || t1 <= t0 {
+        return out;
+    }
+    let span = (t1 - t0) as f64;
+    for &(t, v) in history {
+        if t >= t1 {
+            continue;
+        }
+        let i = (((t - t0).max(0) as f64 / span) * bins as f64) as usize;
+        let slot = &mut out[i.min(bins - 1)];
+        *slot = slot.max(v);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +258,34 @@ mod tests {
         for off in [0, 1, 37, 120] {
             assert_eq!(offset_from_x(x_from_offset(off, strip, 120, 180), strip, 120, 180), off);
         }
+    }
+    #[test]
+    fn scrubber_history_placed_by_time_with_gap() {
+        // 10 s steps, a 3-step window, 7 steps of look-back: the strip covers 100 s
+        let step = 10;
+        let (t0, t1) = scrub_range(&[70, 80, 90], step, 0, 7).unwrap();
+        assert_eq!((t0, t1), (0, 100));
+        // the same strip while looking 2 steps back
+        assert_eq!(scrub_range(&[50, 60, 70], step, 2, 7), Some((0, 100)));
+        // end_offset beyond max_offset is clamped, as the aggregate does
+        assert_eq!(scrub_range(&[0, 10, 20], step, 99, 7), Some((0, 100)));
+        assert_eq!(scrub_range(&[], step, 0, 7), None);
+        assert_eq!(scrub_range(&[1], 0, 0, 7), None);
+
+        // the PC was off from 30 s to 70 s: no stored buckets there
+        let h = [(0, 1.0), (10, 3.0), (20, 2.0), (70, 9.0), (80, 4.0), (90, 5.0), (100, 8.0)];
+        let bins = history_bins(&h, t0, t1, 10);
+        assert_eq!(bins, vec![1.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0, 9.0, 4.0, 5.0]);
+        // by index the spike at 70 s would sit in slot 3; by time it is in slot 7, which is where
+        // the handle sits when the window ends right after it (offset 2: end at 80 s)
+        let strip = Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(100.0, 26.0));
+        let hx = x_from_offset(2, strip, 7, 3);
+        assert!((hx - 80.0).abs() < 1e-3);
+        assert_eq!(offset_from_x(75.0, strip, 7, 3), 3);
+        // peaks per slot, and old entries clamp into the first slot
+        let bins = history_bins(&[(-5, 6.0), (0, 1.0), (50, 2.0), (55, 7.0)], 0, 100, 5);
+        assert_eq!(bins, vec![6.0, 0.0, 7.0, 0.0, 0.0]);
+        assert_eq!(history_bins(&h, 0, 0, 4), vec![0.0; 4]);
+        assert!(history_bins(&h, 0, 100, 0).is_empty());
     }
 }

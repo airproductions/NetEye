@@ -421,8 +421,10 @@ impl TrafficPage {
             theme::label(&mut tui, "All apps", theme::semibold(16.0), c::text());
         }
 
-        // the timeline scrubber sits under the graph and Bars views (Preset spans only)
-        let scrub = self.mode < 2;
+        // the timeline scrubber sits under the graph (Preset spans only). TEMP(task7): Bars, the
+        // list and the strip still read the live `Series` here, so it is hidden under Bars until
+        // the Task 7 merge drives them all from the offset `Agg`; then show it for Graph and Bars.
+        let scrub = self.mode == 0;
         let bottom = if scrub { r.bottom() - SCRUB_H - 30.0 } else { r.bottom() - 28.0 };
         let chart = Rect::from_min_max(Pos2::new(r.left(), r.top() + 90.0), Pos2::new(r.right(), bottom));
         let live = self.graph_agg(s);
@@ -698,10 +700,11 @@ impl TrafficPage {
         let window = agg.times.len();
         let max_offset = agg.max_offset;
         let h = &agg.history;
-        if h.len() >= 2 && bar.width() > 4.0 {
-            // one value per ~2 px (the peak of each bin), so long histories stay cheap to draw
-            let bins = ((bar.width() / 2.0) as usize).clamp(2, h.len());
-            let vals: Vec<f64> = (0..bins).map(|b| h[b * h.len() / bins..((b + 1) * h.len() / bins).max(b * h.len() / bins + 1)].iter().map(|x| x.1).fold(0.0, f64::max)).collect();
+        let range = markers::scrub_range(&agg.times, agg.step, self.end_offset, max_offset);
+        if let (true, Some((t0, t1))) = (h.len() >= 2 && bar.width() > 4.0, range) {
+            // placed by time (gaps stay empty) so it lines up with the handle; one peak per ~2 px
+            let bins = ((bar.width() / 2.0) as usize).max(2);
+            let vals = markers::history_bins(h, t0, t1, bins);
             let peak = vals.iter().cloned().fold(0.0, f64::max);
             theme::area(&p, bar.shrink2(Vec2::new(0.0, 3.0)), &vals, peak, c::faint());
             let fmt = |t: i64| match self.range {
@@ -709,8 +712,8 @@ impl TrafficPage {
                 1 | 2 => theme::clock(t),
                 _ => theme::local(t).format("%-d %b").to_string(),
             };
-            p.text(Pos2::new(bar.left() + 6.0, bar.center().y), Align2::LEFT_CENTER, fmt(h[0].0), theme::regular(10.5), c::muted());
-            p.text(Pos2::new(bar.right() - 6.0, bar.center().y), Align2::RIGHT_CENTER, fmt(h[h.len() - 1].0), theme::regular(10.5), c::muted());
+            p.text(Pos2::new(bar.left() + 6.0, bar.center().y), Align2::LEFT_CENTER, fmt(t0), theme::regular(10.5), c::muted());
+            p.text(Pos2::new(bar.right() - 6.0, bar.center().y), Align2::RIGHT_CENTER, fmt(t1 - agg.step), theme::regular(10.5), c::muted());
         }
         // the visible window and its end handle
         let off = self.end_offset.min(max_offset);
