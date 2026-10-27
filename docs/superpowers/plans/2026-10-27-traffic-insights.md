@@ -314,8 +314,8 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - `#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]` on each of `pub enum Group { Apps, Publishers, Types, Countries }`, `pub enum Net { All, Lan, Wan }` and `pub enum DirF { Both, In, Out }`. Each has `from_u8`/`to_u8`; out-of-range values map to the first variant.
   - `pub fn effective(group: Group, net: Net, admin: bool) -> (Group, Net)`: not admin gives `(Apps, All)`.
   - `#[derive(Clone, PartialEq, Eq, Hash, Debug)] pub enum Sel { All, App(String), Group(Group, String) }`
-  - `#[derive(Clone, PartialEq, Eq, Hash, Debug)] pub struct Query { pub range: usize, pub group: Group, pub net: Net, pub dir: DirF, pub sel: Sel, pub admin: bool }`
-  - `#[derive(Clone, Debug, Default)] pub struct Row { pub key: String, pub label: String, pub down: u64, pub up: u64, pub cc: Option<String>, pub icon_key: Option<String> }`
+  - `#[derive(Clone, PartialEq, Eq, Hash, Debug)] pub struct Query { pub range: usize, pub group: Group, pub net: Net, pub dir: DirF, pub sel: Sel, pub admin: bool, pub end_offset: usize /*steps back from now; 0 = live*/ }`
+  - `#[derive(Clone, Debug, Default)] pub struct Row { pub key: String, pub label: String, pub down: u64, pub up: u64, pub cc: Option<String>, pub icon_key: Option<String>, pub apps: Vec<String> /*Hosts rows: up to 3 app keys by bytes*/, pub more_apps: usize }`
   - `#[derive(Clone, Debug, Default)] pub struct Agg { pub times: Vec<i64>, pub step: i64, pub down: Vec<f64>, pub up: Vec<f64>, pub step_top: Vec<Vec<(String, [u64;2])>>, pub rows: Vec<Row>, pub hosts: Vec<Row>, pub types: Vec<Row>, pub countries: Vec<Row>, pub total: [u64;2], pub lan: [u64;2], pub wan: [u64;2], pub rate: [u64;2] }`
   - `pub fn aggregate(data: &Data, live: &VecDeque<LiveSample>, q: &Query, now: i64) -> Agg`
   - `pub struct AggCache`, with `pub fn get(&mut self, key: CacheKey, f: impl FnOnce() -> Agg) -> Arc<Agg>`. `CacheKey = (Query, i64, u64)`:
@@ -339,10 +339,15 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - **Hosts column.**
     - `Sel::All` reads the `hosts` maps, plus a final "Other traffic (no host)" row = `total − Σhosts` (saturating).
     - A selection reads flows (`h==""` becomes "Other traffic (no host)"), plus the residual as "Not classified".
-    - Flag: the country with the most bytes for that host across the range's flows; `None` when the host has no flows (the UI then draws a chip).
+    - Rows are split by country. One row per (host, cc), with key `"{host}|{cc}"` and `cc = Some(cc)`. Rows that come only from the `hosts` maps have `cc = None` (the UI draws a chip).
+    - `apps`: up to 3 app keys by bytes, from flows, and `more_apps` counts the rest. Rows that come only from the `hosts` maps have no apps.
     - Old IP hosts under the Net filter: an IP that passes `is_private` counts as LAN.
   - **`rate`.** It comes from the newest live sample under the same selection, Net and Dir rules, for every range.
   - **`step_top`.** The top 4 row keys per step for the active group.
+  - **`end_offset`.** The window ends `end_offset` steps before now. For 5m a step is one live sample.
+    - `Agg` also gets `pub history: Vec<(i64, f64)>`: the whole stored history for the range unit, as (t, bytes), for the scrubber strip.
+    - It also gets `pub max_offset: usize`.
+    - `CacheKey` includes `end_offset`.
 
 - [ ] **Step 1: Write the failing tests** (fixture: `let mut d = Data::default(); d.minutes.push(...)`; don't use struct-literal syntax for `Data`):
   - `apps_mode_matches_today`
@@ -357,7 +362,9 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - `net_filter_rows_reconcile`: under `Net::Lan` and `Net::Wan`, on a mixed bucket, Σrows == total, and `Agg.lan`/`Agg.wan` are unchanged by the filter.
   - `direction_in_zeroes_up`: covers rows, total, rate and step_top.
   - `rate_follows_selection_and_dir`
-  - `host_flag_is_majority_country`
+  - `hosts_split_by_country`: host "x" with 10 B in IT and 90 B in IL gives two rows with keys `x|IT` and `x|IL`.
+  - `host_apps_top3`: a host used by 5 apps gives `apps.len()==3` and `more_apps==2`, ordered by bytes.
+  - `end_offset_shifts_window`: with `end_offset=2` on 3h, the window excludes the newest 2 minute buckets, and `max_offset` equals the stored minutes minus the window length.
   - `effective_limited`, and `limited_direction_works_other_present`: `admin=false` with `DirF::Out` works.
   - `cache_reuses_until_key_changes`
   - `#[ignore] aggregate_30d_heavy_under_budget`: in release, `aggregate` on Task 4's heavy fixture for 30d takes under 10 ms. Reuse that fixture builder through a `#[cfg(test)] pub fn heavy_fixture()` in store.rs.
@@ -430,7 +437,9 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - **Sort keys.** `traffic`, `traffic.publisher`, `traffic.type` and `traffic.country`. The natural order is total descending.
   - **Direction filter.** Only one number column shows.
   - **Data source.** `Series` and `series()` are replaced by the cached `Agg` (via `AggCache`). Every section reads the same `Arc<Agg>`. The graph tooltip uses `step_top` and skips the series excluded by Direction.
+  - **Range menu.** It replaces `segmented_text(RANGE_CODES)` with `theme::menu` showing the `RANGES` names, e.g. "24 Hours ▾".
   - **Strip:**
+    - A bell-plus icon above the gauge total, with the tooltip "Set a data alert". Clicking it pushes a new `Action::OpenSettings` that switches to the Settings page; add the variant and its handling in `mod.rs`.
     - ↓/↑ totals come from `Agg.total` and rates from `Agg.rate`. The excluded direction is dimmed and shows "—".
     - The Internet/Local rows come from `Agg.wan`/`Agg.lan`. Under a Net filter the excluded row is dimmed but keeps its value.
     - The gauge is unchanged.
@@ -470,6 +479,9 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - Three equal columns separated by 1 px `c::border()` lines.
   - Each column has its own scroll and `sort::header` (keys `usage.hosts`, `usage.types`, `usage.countries`; the default and natural order is total descending).
   - Rows: a flag, chip or glyph at `flags::SIZE`; a truncated name with a tooltip; the total; and a thin bar split by direction, scaled to the column's largest row.
+  - Hosts rows end with up to 3 app icons (`Row.apps`, drawn with `Icons::draw` at 16 px), plus "+N" when `more_apps > 0`.
+  - Each column shows its top 20 rows, then a "+N more" row with `Glyph::Grid` and the remaining bytes. Clicking it expands that column. `expanded: [bool; 3]` resets when the range or selection changes.
+  - Pure helper: `fn visible_rows(rows: &[Row], expanded: bool) -> (Vec<&Row>, Option<(usize, u64)>)`.
   - Under the Countries column: the "IP Geolocation by DB-IP" hyperlink.
   - Limited mode: the view opens and shows the administrator note and the restart button, and the Usage button stays clickable.
 - Export:
@@ -491,6 +503,7 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - `csv_starts_with_bom_header`
   - `csv_raw_integers_and_total`
   - `file_name_strips_illegal`
+  - `visible_rows_collapses_tail`: 25 rows, collapsed, gives 20 rows plus `Some((5, sum_of_last_5))`. Expanded, it gives 25 rows and `None`.
 - [ ] **Step 2:** Run `cargo test csv`. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run `cargo test` and `cargo build`. Commit "Usage view with hosts, types and countries; CSV export".
@@ -521,6 +534,13 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
     - A `theme::menu` sits at the top-left of the plot, labelled via `theme::rate`.
     - The choice is saved in the matching `graph_scale_*` field.
     - When data exceeds a fixed scale, the series is clipped and the note "▲ clipped" shows.
+  - **Timeline scrubber.**
+    - A 26 px strip under the graph and Bars views shows a faint area of `Agg.history`, time labels, and a draggable handle at the window end.
+    - Dragging sets `end_offset` (from 0 to `Agg.max_offset`).
+    - When `end_offset > 0`, a "Now" chip appears, and clicking it sets 0. The glide stops, and the list, Usage view and strip all use the offset `Query`.
+    - Changing range sets `end_offset = 0`.
+    - The chart height budget at 1100×680 in limited mode is about 306 px minus 26 px, so about 280 px.
+    - Pure helper: `fn offset_from_x(x: f32, strip: Rect, max_offset: usize, window: usize) -> usize`.
   - **Pause.**
     - An icon button (`Pause`/`Play`) sits at the top-right of the plot.
     - `paused: Option<Arc<Agg>>` is a snapshot used for the series, markers and axis. The list, Usage view and strip stay live.
@@ -536,6 +556,7 @@ Also add `tools/flag-atlas/target/` to `.gitignore`. Commit as "Scaffold Traffic
   - `scale_preset_lookup`: index 0 gives `None`, and index 3 gives 1e6.
   - `pause_cleared_on_query_change`
   - `glide_no_repaint_when_paused_or_stale` (Review Focus 5)
+  - `offset_from_x_clamps`: x at the right edge gives 0, x at the left edge gives `max_offset`, and anything outside the strip is clamped.
 - [ ] **Step 2:** Run `cargo test markers` and `cargo test traffic`. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run `cargo test` and `cargo build`. Commit "Graph event markers, scale menu and pause".

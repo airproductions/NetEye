@@ -261,3 +261,18 @@ This covers old buckets, limited-mode buckets and the bucket that is open at upg
 - The port table contents: about 110 self-written entries, IANA as reference, no Nmap or Wireshark text.
 - The cache structure, and how the snapshot is taken.
 - Glyphs for traffic types: a handful of categories (web, name lookup, file sharing, mail, remote access, streaming, gaming, other).
+
+## Additions from the user's second set of screenshots (approved: "ADD THESE FUNCTIONS")
+
+1. **Hosts split by country.** The Hosts column shows one row per (host, country). For example, `github.com` (DE) and `github.com` (IL) are separate rows, each with its own flag. This **replaces** the "flag of the country with the most bytes" rule.
+2. **App icons per host.** Each Hosts row ends with the icons of up to 3 apps that used that host in the range, taken from flows and largest first, with a "+N" when there are more apps. Rows that come only from the old `hosts` maps have no icons.
+3. **"+N more" row.** Each Usage column shows its top 20 rows, then a "+N more" row with a grid glyph and the remaining bytes. Clicking it expands that column to show everything, and it resets when the range or selection changes.
+4. **Range menu.** The range control becomes a dropdown labelled "5 Minutes ▾ / 3 Hours / 24 Hours / Week / Month", using `theme::menu`, in place of the segmented short codes.
+5. **Timeline scrubber.** A thin strip under the graph and Bars views shows the whole stored history for the current range unit:
+   - Units: live seconds for 5m, minute buckets for 3h/24h, hour buckets for 7d/30d.
+   - The strip is a faint mini area chart with time labels, plus a handle marking the end of the visible window.
+   - **Dragging the handle** pans the window back in time.
+   - **When the handle isn't at "now":** the graph, list, Usage view and strip show that window. The view is no longer live (like pause), and a "Now" chip snaps it back.
+   - **Changing range** returns to now.
+   - The handle position is part of the query as `end_offset` (in steps), so the aggregation cache keys on it.
+6. **Data-alert bell on the gauge.** A small bell-plus icon above the gauge total. Clicking it opens Settings at the data plan section, so the user can set or change the limit. Its tooltip is "Set a data alert".
