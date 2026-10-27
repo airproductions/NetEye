@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::theme::{self, c, Glyph, Icons};
 use super::Action;
@@ -56,13 +56,20 @@ impl FirewallPage {
         let full = ui.max_rect();
         self.toolbar(ui, s, actions, full);
 
+        // the table lives in one glass card inside the 16px gutter
+        let card = Rect::from_min_max(Pos2::new(full.left() + 16.0, ui.cursor().top() + 4.0), Pos2::new(full.right() - 16.0, full.bottom() - 14.0));
+        theme::glass(ui.painter(), card, 14);
+        let inner = card.shrink2(Vec2::new(1.0, 6.0));
+        let ui = &mut ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
+        ui.set_clip_rect(inner.intersect(ui.clip_rect()));
+        let full = inner;
+
         let cols = Cols::new(full.left(), full.width());
-        let (hr, _) = ui.allocate_exact_size(Vec2::new(full.width(), 34.0), Sense::hover());
+        let (hr, _) = ui.allocate_exact_size(Vec2::new(full.width(), 30.0), Sense::hover());
         let p = ui.painter();
-        p.rect_filled(hr, CornerRadius::ZERO, c::panel());
         let hy = hr.center().y;
         let head = |x: f32, t: &str| {
-            p.text(Pos2::new(x, hy), Align2::LEFT_CENTER, t, theme::regular(13.0), c::muted());
+            p.text(Pos2::new(x, hy), Align2::LEFT_CENTER, t, theme::semibold(12.0), c::muted());
         };
         head(cols.app + 30.0, "Apps");
         head(cols.inc + 8.0, "Incoming");
@@ -137,7 +144,8 @@ impl FirewallPage {
 
     fn toolbar(&mut self, ui: &mut egui::Ui, s: &Shared, actions: &mut Vec<Action>, full: Rect) {
         let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 96.0), Sense::hover());
-        let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(28.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        theme::glass(ui.painter(), Rect::from_min_max(Pos2::new(bar.left() + 16.0, bar.top() + 4.0), Pos2::new(bar.right() - 16.0, bar.bottom() - 4.0)), 14);
+        let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(44.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let enabled = s.store.data.settings.firewall_enabled;
         b.vertical(|ui| {
             theme::label(ui, "Firewall rules", theme::semibold(15.0), c::text());
@@ -198,10 +206,12 @@ impl FirewallPage {
         let rec = s.store.data.apps.get(key).cloned().unwrap_or_default();
         let expanded = self.expanded.contains(key);
         let p = ui.painter().clone();
-        if resp.hovered() {
-            p.rect_filled(row, CornerRadius::ZERO, c::hover());
-        } else if i % 2 == 1 {
+        if i % 2 == 1 {
             p.rect_filled(row, CornerRadius::ZERO, c::row_alt());
+        }
+        let ht = super::motion::hover(ui, resp.id, resp.hovered());
+        if ht > 0.0 {
+            p.rect_filled(row, CornerRadius::ZERO, c::hover().gamma_multiply(ht));
         }
         let cy = row.center().y;
         let has_conns = !live.conns.is_empty();
@@ -280,7 +290,7 @@ impl FirewallPage {
             for cv in conns.iter().take(60) {
                 let (r, _) = ui.allocate_exact_size(Vec2::new(width, SUB_H), Sense::hover());
                 let p = ui.painter();
-                p.rect_filled(r, CornerRadius::ZERO, Color32::from_rgb(0x17, 0x19, 0x1e));
+                p.rect_filled(r, CornerRadius::ZERO, c::raised().gamma_multiply(0.5));
                 let y = r.center().y;
                 let host = cv.host.clone().unwrap_or_else(|| cv.remote.to_string());
                 p.text(Pos2::new(cols.app + 48.0, y), Align2::LEFT_CENTER, if cv.inbound { "↘ Incoming" } else { "↗ Outgoing" }, theme::regular(12.5), c::muted());
@@ -298,7 +308,7 @@ impl FirewallPage {
             if !listening.is_empty() {
                 let ports: Vec<String> = listening.iter().take(12).map(|c| format!("{} {}", if c.proto == Proto::Tcp { "TCP" } else { "UDP" }, c.local_port)).collect();
                 let (r, _) = ui.allocate_exact_size(Vec2::new(width, SUB_H), Sense::hover());
-                ui.painter().rect_filled(r, CornerRadius::ZERO, Color32::from_rgb(0x17, 0x19, 0x1e));
+                ui.painter().rect_filled(r, CornerRadius::ZERO, c::raised().gamma_multiply(0.5));
                 ui.painter().text(Pos2::new(cols.app + 48.0, r.center().y), Align2::LEFT_CENTER, format!("Listening on {}", ports.join(", ")), theme::regular(12.5), c::faint());
             }
         }
@@ -308,9 +318,11 @@ impl FirewallPage {
 fn section(ui: &mut egui::Ui, width: f32, title: &str, count: usize, open: bool) -> bool {
     let (r, resp) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::click());
     let p = ui.painter();
-    if resp.hovered() {
-        p.rect_filled(r, CornerRadius::ZERO, c::hover());
+    let ht = super::motion::hover(ui, resp.id, resp.hovered());
+    if ht > 0.0 {
+        p.rect_filled(r, CornerRadius::ZERO, c::hover().gamma_multiply(ht));
     }
+    p.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0_f32, c::border().gamma_multiply(0.5)));
     theme::glyph(p, Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(12.0)), if open { Glyph::ChevronDown } else { Glyph::Chevron }, c::muted());
     let tr = p.text(Pos2::new(r.left() + 36.0, r.center().y), Align2::LEFT_CENTER, title, theme::semibold(14.5), c::text());
     p.text(Pos2::new(tr.right() + 8.0, r.center().y), Align2::LEFT_CENTER, count.to_string(), theme::regular(13.0), c::muted());

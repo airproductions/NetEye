@@ -528,12 +528,12 @@ pub fn search_box(ui: &mut Ui, value: &mut String, width: f32, hint: &str) -> Re
 pub fn status_pill(ui: &mut Ui, rect: Rect, blocked: bool, enabled: bool, id: egui::Id) -> Response {
     let resp = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
     let (bg, fg, label) = if blocked {
-        (Color32::from_rgb(0x4a, 0x1f, 0x24), c::bad(), "Blocked")
+        (c::bad().gamma_multiply(36.0 / 255.0), c::bad(), "Blocked")
     } else {
-        (Color32::from_rgb(0x17, 0x3b, 0x2f), c::good(), "Allowed")
+        (c::good().gamma_multiply(36.0 / 255.0), c::good(), "Allowed")
     };
     let t = motion::hover(ui, id, resp.hovered());
-    let bg = if !enabled { Color32::from_rgb(0x25, 0x29, 0x31) } else { lerp_color(bg, fg, 0.18 * t) };
+    let bg = if !enabled { c::raised() } else { lerp_color(bg, fg, 0.18 * t) };
     let fg = if enabled { fg } else { c::faint() };
     ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, semibold(12.5), fg);
