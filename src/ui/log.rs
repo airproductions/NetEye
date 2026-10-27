@@ -2,8 +2,9 @@
 
 use std::collections::HashSet;
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Vec2};
 
+use super::motion;
 use super::theme::{self, c, Glyph, Icons};
 use crate::monitor::Shared;
 use crate::store::{Event, EventKind};
@@ -33,11 +34,14 @@ impl LogPage {
         }
 
         let mut clear = false;
-        let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 72.0), Sense::hover());
-        ui.painter().rect_filled(bar, CornerRadius::ZERO, c::panel());
-        ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0_f32, c::border()));
-        let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(24.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 64.0), Sense::hover());
+        let card = bar.shrink2(Vec2::new(16.0, 4.0));
+        theme::glass(ui.painter(), card, 14);
+        let mut b = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink2(Vec2::new(16.0, 8.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        prefix_glyph(&mut b, Glyph::Bell, "Which events to show");
         theme::dropdown(&mut b, "log-filter", &FILTERS, &mut self.filter);
+        b.add_space(10.0);
+        prefix_glyph(&mut b, Glyph::Clock, "Time period");
         theme::dropdown(&mut b, "log-period", &PERIODS, &mut self.period);
         b.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if theme::pill(ui, "Clear log", None, false).clicked() {
@@ -84,55 +88,62 @@ impl LogPage {
 
         let width = full.width();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let mut last_day = None;
-            let mut idx_in_group = 0;
-            for e in &events {
-                let day = theme::local(e.t).date_naive();
-                if last_day != Some(day) {
-                    last_day = Some(day);
-                    idx_in_group = 0;
-                    ui.add_space(12.0);
-                    let label = if day == today {
-                        "Today".to_string()
-                    } else if Some(day) == today.pred_opt() {
-                        "Yesterday".to_string()
-                    } else {
-                        day.format("%A, %-d %B %Y").to_string()
-                    };
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
-                    ui.painter().text(Pos2::new(r.left() + 48.0, r.center().y), Align2::LEFT_CENTER, label, theme::semibold(15.5), c::text());
-                }
-                let (r, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::hover());
-                let card = Rect::from_min_max(Pos2::new(r.left() + 40.0, r.top()), Pos2::new(r.right() - 40.0, r.bottom()));
-                let p = ui.painter().clone();
-                p.rect_filled(card, CornerRadius::ZERO, if resp.hovered() { c::hover() } else { c::panel() });
-                if idx_in_group > 0 {
-                    p.line_segment([Pos2::new(card.left() + 20.0, card.top()), Pos2::new(card.right() - 20.0, card.top())], Stroke::new(1.0_f32, c::border()));
-                }
-                idx_in_group += 1;
-                let cy = card.center().y;
-                badge(&p, Pos2::new(card.left() + 44.0, cy), e.kind);
-                if fresh.contains(&e.id) {
-                    p.circle_filled(Pos2::new(card.left() + 14.0, cy), 4.0, c::accent());
-                }
+            let mut i = 0;
+            while i < events.len() {
+                let day = theme::local(events[i].t).date_naive();
+                let n = events[i..].iter().take_while(|e| theme::local(e.t).date_naive() == day).count();
+                ui.add_space(10.0);
+                let label = if day == today {
+                    "Today".to_string()
+                } else if Some(day) == today.pred_opt() {
+                    "Yesterday".to_string()
+                } else {
+                    day.format("%A, %-d %B %Y").to_string()
+                };
+                let (r, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
+                ui.painter().text(Pos2::new(r.left() + 28.0, r.center().y), Align2::LEFT_CENTER, label, theme::semibold(15.5), c::text());
+                let pad = 6.0;
+                let (gr, _) = ui.allocate_exact_size(Vec2::new(width, n as f32 * ROW_H + pad * 2.0), Sense::hover());
+                let group = gr.shrink2(Vec2::new(16.0, 0.0));
+                theme::glass(ui.painter(), group, 14);
+                for (k, e) in events[i..i + n].iter().enumerate() {
+                    let card = Rect::from_min_size(Pos2::new(group.left() + pad, group.top() + pad + k as f32 * ROW_H), Vec2::new(group.width() - pad * 2.0, ROW_H));
+                    let resp = ui.interact(card, ui.id().with(("log-row", e.id)), Sense::hover());
+                    let t = motion::hover(ui, resp.id, resp.hovered());
+                    let p = ui.painter().clone();
+                    let base = if k % 2 == 1 { c::row_alt() } else { Color32::TRANSPARENT };
+                    p.rect_filled(card, CornerRadius::same(10), theme::lerp_color(base, c::hover(), t));
+                    let cy = card.center().y;
+                    badge(&p, Pos2::new(card.left() + 44.0, cy), e.kind);
+                    if fresh.contains(&e.id) {
+                        p.circle_filled(Pos2::new(card.left() + 14.0, cy), 4.0, c::accent());
+                    }
 
-                let mut x = card.left() + 88.0;
-                let max_x = card.right() - 260.0;
-                if let Some(app) = &e.app {
-                    let name = s.app_name(app);
-                    icons.draw(ui, s, app, Rect::from_center_size(Pos2::new(x + 9.0, cy), Vec2::splat(18.0)), &name);
-                    x += 26.0;
-                    x = seg(&p, x, cy, &name, true, max_x);
+                    let mut x = card.left() + 88.0;
+                    let max_x = card.right() - 260.0;
+                    if let Some(app) = &e.app {
+                        let name = s.app_name(app);
+                        icons.draw(ui, s, app, Rect::from_center_size(Pos2::new(x + 9.0, cy), Vec2::splat(18.0)), &name);
+                        x += 26.0;
+                        x = seg(&p, x, cy, &name, true, max_x);
+                    }
+                    for (t, bold) in segments(e) {
+                        x = seg(&p, x, cy, &t, bold, max_x);
+                    }
+                    p.text(Pos2::new(card.right() - 28.0, cy - 11.0), Align2::RIGHT_CENTER, e.kind.source(), theme::regular(13.0), c::muted());
+                    p.text(Pos2::new(card.right() - 28.0, cy + 11.0), Align2::RIGHT_CENTER, theme::local(e.t).format("%-I:%M %P").to_string(), theme::regular(13.0), c::muted());
                 }
-                for (t, bold) in segments(e) {
-                    x = seg(&p, x, cy, &t, bold, max_x);
-                }
-                p.text(Pos2::new(card.right() - 28.0, cy - 11.0), Align2::RIGHT_CENTER, e.kind.source(), theme::regular(13.0), c::muted());
-                p.text(Pos2::new(card.right() - 28.0, cy + 11.0), Align2::RIGHT_CENTER, theme::local(e.t).format("%-I:%M %P").to_string(), theme::regular(13.0), c::muted());
+                i += n;
             }
             ui.add_space(24.0);
         });
     }
+}
+
+fn prefix_glyph(ui: &mut egui::Ui, g: Glyph, tip: &str) {
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+    theme::glyph(ui.painter(), r.shrink(1.0), g, c::muted());
+    resp.on_hover_text(tip);
 }
 
 fn describe(k: EventKind) -> &'static str {
