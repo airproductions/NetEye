@@ -19,6 +19,70 @@ pub const HW_SECONDS: usize = 300;
 pub const SYSTEM_KEY: &str = "system";
 pub const OTHER_KEY: &str = "__other";
 const RDP_PORT: u16 = 3389;
+/// How often the monitor writes `data.json` in the background.
+pub const SAVE_EVERY: Duration = Duration::from_secs(120);
+/// Live samples (newest first) that keep their per-flow detail; older ones keep totals only.
+const LIVE_FLOW_SECONDS: usize = 300;
+/// Distinct addresses the monitor remembers a country for before starting over.
+const GEO_CACHE_CAP: usize = 4096;
+
+/// Per app, bytes this tick keyed by (host, traffic type, country).
+type FlowAcc = HashMap<String, HashMap<(String, String, String), [u64; 2]>>;
+
+/// Adds one connection's bytes to its app's (host, type, country) entry.
+fn accumulate_flow(per_flow: &mut FlowAcc, app: &str, host: &str, ty: &str, cc: &str, rate: [u64; 2]) {
+    let e = per_flow.entry(app.to_string()).or_default().entry((host.to_string(), ty.to_string(), cc.to_string())).or_default();
+    e[0] += rate[0];
+    e[1] += rate[1];
+}
+
+/// The flow for bytes no connection accounts for. Only an administrator can attribute bytes to
+/// connections at all, so limited mode records none.
+fn residual_flow(other: [u64; 2], admin: bool) -> Option<store::Flow> {
+    if !admin || other == [0, 0] {
+        return None;
+    }
+    Some(store::Flow { h: String::new(), ty: crate::ports::UNATTRIBUTED.into(), cc: crate::geo::UNKNOWN.into(), d: other[0], u: other[1] })
+}
+
+/// Remembers the country of each remote address, so the database is read once per address.
+struct GeoCache {
+    map: HashMap<IpAddr, String>,
+    cap: usize,
+}
+
+impl GeoCache {
+    fn new() -> Self {
+        GeoCache { map: HashMap::new(), cap: GEO_CACHE_CAP }
+    }
+
+    /// The cached code for `ip`, or `f(ip)` stored for next time. A full cache starts over.
+    fn get_with(&mut self, ip: IpAddr, f: impl FnOnce(IpAddr) -> String) -> String {
+        if let Some(cc) = self.map.get(&ip) {
+            return cc.clone();
+        }
+        if self.map.len() >= self.cap {
+            self.map.clear();
+        }
+        let cc = f(ip);
+        self.map.insert(ip, cc.clone());
+        cc
+    }
+
+    fn get(&mut self, ip: IpAddr) -> String {
+        self.get_with(ip, crate::geo::country_of)
+    }
+}
+
+/// Drops the flow detail of every live sample except the newest `keep`.
+fn trim_live_flows(live: &mut VecDeque<LiveSample>, keep: usize) {
+    let old = live.len().saturating_sub(keep);
+    for s in live.iter_mut().take(old) {
+        if !s.flows.is_empty() {
+            s.flows = Vec::new();
+        }
+    }
+}
 
 /// Desktop notifications stay quiet until this unix time (Settings → Snooze).
 static SNOOZE_UNTIL: AtomicI64 = AtomicI64::new(0);
@@ -623,6 +687,7 @@ impl Monitor {
         let mut est_bytes = [0u64; 2]; // attributed vs interface total since last report
         let mut last_report = Instant::now();
         let mut rdp_seen: HashSet<IpAddr> = HashSet::new();
+        let mut geo = GeoCache::new();
 
         loop {
             next += Duration::from_secs(1);
@@ -660,6 +725,7 @@ impl Monitor {
             let mut apps_live: HashMap<String, AppLive> = HashMap::new();
             let mut per_app: HashMap<String, [u64; 2]> = HashMap::new();
             let mut per_host: HashMap<String, [u64; 2]> = HashMap::new();
+            let mut per_flow: FlowAcc = HashMap::new();
             let mut lan = [0u64; 2];
             let mut attributed = [0u64; 2];
             let mut next_stats = HashMap::new();
@@ -726,6 +792,8 @@ impl Monitor {
                     pa[0] += rate[0];
                     pa[1] += rate[1];
                     let label = host.clone().unwrap_or_else(|| c.remote.to_string());
+                    let ty = crate::ports::classify(c.local_port, c.remote_port, inbound, true);
+                    accumulate_flow(&mut per_flow, key, &label, ty, &geo.get(c.remote), rate);
                     let ph = per_host.entry(label).or_default();
                     ph[0] += rate[0];
                     ph[1] += rate[1];
@@ -765,6 +833,13 @@ impl Monitor {
                 let e = apps_live.entry(OTHER_KEY.into()).or_default();
                 e.rate = other;
             }
+            let mut flows: HashMap<String, Vec<store::Flow>> = per_flow
+                .into_iter()
+                .map(|(app, m)| (app, m.into_iter().map(|((h, ty, cc), [d, u])| store::Flow { h, ty, cc, d, u }).collect()))
+                .collect();
+            if let Some(f) = residual_flow(other, admin) {
+                flows.entry(OTHER_KEY.into()).or_default().push(f);
+            }
             let total_down = total_down.max(attributed[0]);
             let total_up = total_up.max(attributed[1]);
 
@@ -798,6 +873,7 @@ impl Monitor {
 
             // --- publish
             let mut asks: Vec<String> = Vec::new();
+            let mut snap = None;
             {
                 let mut guard = self.lock();
                 let s = &mut *guard;
@@ -881,11 +957,14 @@ impl Monitor {
 
                 let mut sample_apps: Vec<(String, [u64; 2])> = per_app.iter().map(|(k, v)| (k.clone(), *v)).collect();
                 sample_apps.sort_by_key(|(_, v)| std::cmp::Reverse(v[0] + v[1]));
-                s.live.push_back(LiveSample { t, down: total_down, up: total_up, apps: sample_apps, flows: Vec::new() });
+                let sample_flows: Vec<(String, store::Flow)> =
+                    flows.iter().flat_map(|(app, list)| list.iter().map(move |f| (app.clone(), f.clone()))).collect();
+                s.live.push_back(LiveSample { t, down: total_down, up: total_up, apps: sample_apps, flows: sample_flows });
                 while s.live.len() > LIVE_SECONDS {
                     s.live.pop_front();
                 }
-                s.store.add_usage(t, [total_down, total_up, lan[0], lan[1]], &per_app, &per_host, &HashMap::new());
+                trim_live_flows(&mut s.live, LIVE_FLOW_SECONDS);
+                s.store.add_usage(t, [total_down, total_up, lan[0], lan[1]], &per_app, &per_host, &flows);
                 let cap = s.store.data.settings.daily_cap_mb * 1_000_000;
                 let (used, period) = s.store.plan_usage();
                 if cap > 0 && used >= cap && s.store.data.cap_alerted.as_deref() != Some(&period) {
@@ -912,10 +991,14 @@ impl Monitor {
                 s.hw.app_history.retain(|k, _| app_hw.contains_key(k));
                 s.hw.apps = app_hw;
 
-                if last_save.elapsed() > Duration::from_secs(30) {
-                    s.store.save();
+                if last_save.elapsed() >= SAVE_EVERY {
+                    snap = s.store.snapshot();
                     last_save = Instant::now();
                 }
+            }
+            // Written after the lock is released, so the UI never waits on the disk.
+            if let Some((dir, gen, data)) = snap {
+                Store::write_snapshot(&dir, gen, &data);
             }
             for key in asks {
                 self.set_block(&key, Dir::Out, true);
@@ -994,4 +1077,77 @@ fn notify(body: &str) {
     std::thread::spawn(move || {
         let _ = notify_rust::Notification::new().summary("Vantage").body(&body).show();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accumulate_merges() {
+        let mut m: HashMap<String, HashMap<(String, String, String), [u64; 2]>> = HashMap::new();
+        accumulate_flow(&mut m, "app", "example.com", "https", "US", [10, 2]);
+        accumulate_flow(&mut m, "app", "example.com", "https", "US", [5, 3]);
+        accumulate_flow(&mut m, "app", "other.com", "https", "US", [1, 1]);
+        let a = &m["app"];
+        assert_eq!(a.len(), 2);
+        assert_eq!(a[&("example.com".into(), "https".into(), "US".into())], [15, 5]);
+    }
+
+    #[test]
+    fn residual_only_when_admin() {
+        assert_eq!(residual_flow([7, 3], false), None);
+        let f = residual_flow([7, 3], true).expect("admin residual");
+        assert_eq!(f, store::Flow { h: String::new(), ty: crate::ports::UNATTRIBUTED.into(), cc: "ZZ".into(), d: 7, u: 3 });
+    }
+
+    #[test]
+    fn residual_zero_is_none() {
+        assert_eq!(residual_flow([0, 0], true), None);
+    }
+
+    #[test]
+    fn geo_cache_bounded() {
+        let mut g = GeoCache::new();
+        let mut calls = 0usize;
+        for i in 0..=g.cap as u32 {
+            let ip = IpAddr::from(std::net::Ipv4Addr::from(0x0b00_0000 + i));
+            g.get_with(ip, |_| {
+                calls += 1;
+                "US".into()
+            });
+            assert!(g.map.len() <= g.cap);
+        }
+        assert_eq!(calls, g.cap + 1);
+        let ip: IpAddr = "8.8.8.8".parse().unwrap();
+        assert_eq!(g.get_with(ip, |_| "US".into()), "US");
+        let before = calls;
+        assert_eq!(
+            g.get_with(ip, |_| {
+                calls += 1;
+                "XX".into()
+            }),
+            "US"
+        );
+        assert_eq!(calls, before);
+    }
+
+    #[test]
+    fn live_flows_trimmed() {
+        let f = store::Flow { h: "h".into(), ty: "https".into(), cc: "US".into(), d: 1, u: 1 };
+        let mut live: VecDeque<LiveSample> = (0..10)
+            .map(|t| LiveSample { t, down: 1, up: 1, apps: Vec::new(), flows: vec![("a".into(), f.clone())] })
+            .collect();
+        trim_live_flows(&mut live, 3);
+        for (i, s) in live.iter().enumerate() {
+            assert_eq!(s.flows.is_empty(), i < 7, "sample {i}");
+        }
+        trim_live_flows(&mut live, 300);
+        assert_eq!(live.iter().filter(|s| !s.flows.is_empty()).count(), 3);
+    }
+
+    #[test]
+    fn save_every_is_two_minutes() {
+        assert_eq!(SAVE_EVERY, Duration::from_secs(120));
+    }
 }
