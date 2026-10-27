@@ -21,6 +21,14 @@ fn main() -> eframe::Result {
         let _store = store::Store::load(); // initialises the diagnostics log
         std::process::exit(system::run_firewall_batch(&args[2]));
     }
+    // run by the uninstaller (elevated): leave nothing behind that keeps blocking apps
+    if args.iter().any(|a| a == "--uninstall-cleanup") {
+        let _store = store::Store::load(); // initialises the diagnostics log
+        let r = wfp::remove_all();
+        diag::log(&format!("uninstall cleanup: firewall filters removed {r:?}"));
+        system::set_run_on_startup(false);
+        std::process::exit(if r.is_ok() { 0 } else { 1 });
+    }
     if args.iter().any(|a| a == "--demo") {
         demo::enable();
     }

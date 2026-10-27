@@ -8,7 +8,7 @@ use std::ptr::{null, null_mut};
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::{
-    FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteByKey0, FwpmFilterGetByKey0, FwpmFreeMemory0,
+    FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterCreateEnumHandle0, FwpmFilterDeleteByKey0, FwpmFilterDestroyEnumHandle0, FwpmFilterEnum0, FwpmFilterGetByKey0, FwpmFreeMemory0, FwpmSubLayerDeleteByKey0,
     FwpmGetAppIdFromFileName0, FwpmSubLayerAdd0, FWPM_CONDITION_ALE_APP_ID, FWPM_FILTER0, FWPM_FILTER_CONDITION0,
     FWPM_FILTER_FLAG_PERSISTENT, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
     FWPM_CONDITION_FLAGS, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWP_CONDITION_FLAG_IS_LOOPBACK, FWP_MATCH_FLAGS_NONE_SET, FWP_UINT32, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_SUBLAYER0, FWPM_SUBLAYER_FLAG_PERSISTENT,
@@ -143,6 +143,47 @@ impl Drop for Engine {
     fn drop(&mut self) {
         unsafe { FwpmEngineClose0(self.0) };
     }
+}
+
+/// Deletes every filter NetEye ever added (anything in its sublayer) and the sublayer itself, so
+/// nothing stays blocked after an uninstall. Returns how many filters went. Requires administrator.
+pub fn remove_all() -> Result<usize, String> {
+    let engine = Engine::open()?;
+    let same = |a: &GUID, b: &GUID| a.data1 == b.data1 && a.data2 == b.data2 && a.data3 == b.data3 && a.data4 == b.data4;
+    let mut keys: Vec<GUID> = Vec::new();
+    // SAFETY: the enum handle is destroyed and every batch freed with FwpmFreeMemory0; filter
+    // pointers are read only while their batch is alive.
+    unsafe {
+        let mut h: HANDLE = null_mut();
+        let rc = FwpmFilterCreateEnumHandle0(engine.0, null(), &mut h);
+        if rc != 0 {
+            return Err(format!("could not list filters (0x{rc:08x})"));
+        }
+        loop {
+            let mut entries: *mut *mut FWPM_FILTER0 = null_mut();
+            let mut n: u32 = 0;
+            if FwpmFilterEnum0(engine.0, h, 256, &mut entries, &mut n) != 0 || n == 0 {
+                break;
+            }
+            for i in 0..n as usize {
+                let f = *entries.add(i);
+                if !f.is_null() && same(&(*f).subLayerKey, &SUBLAYER) {
+                    keys.push((*f).filterKey);
+                }
+            }
+            let mut mem = entries as *mut core::ffi::c_void;
+            FwpmFreeMemory0(&mut mem);
+            if n < 256 {
+                break;
+            }
+        }
+        FwpmFilterDestroyEnumHandle0(engine.0, h);
+        for k in &keys {
+            FwpmFilterDeleteByKey0(engine.0, k);
+        }
+        FwpmSubLayerDeleteByKey0(engine.0, &SUBLAYER);
+    }
+    Ok(keys.len())
 }
 
 /// Applies (program, direction, block?) changes. Requires administrator.
