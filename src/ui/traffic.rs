@@ -14,22 +14,37 @@ const RANGES: [&str; 5] = ["5 Minutes", "3 Hours", "24 Hours", "Week", "Month"];
 const RANGE_CODES: [&str; 5] = ["5m", "3h", "24h", "7d", "30d"];
 const ROW_H: f32 = 32.0;
 const STRIP_H: f32 = 92.0;
-/// Biggest download first, which is the list's historical order.
-const DEFAULT_SORT: SortSpec = SortSpec { col: 1, desc: true };
+/// No column picked: today's order (total traffic, biggest first). No header shows as active.
+const NATURAL: SortSpec = SortSpec { col: u8::MAX, desc: true };
 
-/// Orders (name, down, up) rows: column 0 by name, 1 by download, 2 by upload; ties fall back to name.
-#[cfg(test)]
-fn sort_rows(rows: &mut [(String, u64, u64)], spec: SortSpec) {
-    sort::apply(rows, spec, |a, b, col| cmp_col(col, (&a.0, a.1, a.2), (&b.0, b.1, b.2)), |r| r.0.as_str());
+/// A saved column outside the list's three columns (other than the sentinel) falls back to NATURAL.
+fn normalize(spec: SortSpec) -> SortSpec {
+    if spec.col > 2 { NATURAL } else { spec }
 }
 
-fn cmp_col(col: u8, a: (&str, u64, u64), b: (&str, u64, u64)) -> std::cmp::Ordering {
-    match col {
-        0 => sort::cmp_text(a.0, b.0),
-        1 => a.1.cmp(&b.1),
-        2 => a.2.cmp(&b.2),
-        _ => std::cmp::Ordering::Equal,
-    }
+/// (app key, display name, [down, up])
+type AppRow = (String, String, [u64; 2]);
+/// (app key, display name, connection count)
+type ConnRow = (String, String, usize);
+
+/// Columns: 0 name, 1 download, 2 upload; NATURAL (and anything else) is down + up.
+fn order_apps(rows: &mut [AppRow], spec: SortSpec) {
+    sort::apply(
+        rows,
+        spec,
+        |a, b, col| match col {
+            0 => sort::cmp_text(&a.1, &b.1),
+            1 => a.2[0].cmp(&b.2[0]),
+            2 => a.2[1].cmp(&b.2[1]),
+            _ => (a.2[0] + a.2[1]).cmp(&(b.2[0] + b.2[1])),
+        },
+        |r| r.1.as_str(),
+    );
+}
+
+/// "Connected now" has no byte counts: name for column 0, connection count otherwise.
+fn order_connected(rows: &mut [ConnRow], spec: SortSpec) {
+    sort::apply(rows, spec, |a, b, col| if col == 0 { sort::cmp_text(&a.1, &b.1) } else { a.2.cmp(&b.2) }, |r| r.1.as_str());
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -252,10 +267,7 @@ impl TrafficPage {
 
         let (cd, cu) = (r.right() - 88.0, r.right() - 14.0);
         let (hr, _) = ui.allocate_exact_size(Vec2::new(r.width(), 28.0), Sense::hover());
-        let mut spec = s.store.data.settings.sort_for("traffic", DEFAULT_SORT);
-        if spec.col > 2 {
-            spec = DEFAULT_SORT;
-        }
+        let mut spec = normalize(s.store.data.settings.sort_for("traffic", NATURAL));
         let hh = |x0: f32, x1: f32| Rect::from_min_max(Pos2::new(x0, hr.top()), Pos2::new(x1, hr.bottom()));
         let mut changed = false;
         changed |= sort::header(ui, hh(r.left() + 46.0, cd - 100.0), "App", 0, &mut spec, false, Align2::LEFT_CENTER);
@@ -267,7 +279,7 @@ impl TrafficPage {
         }
         ui.painter().line_segment([Pos2::new(r.left(), hr.bottom()), Pos2::new(r.right(), hr.bottom())], Stroke::new(1.0_f32, c::border()));
 
-        let mut apps: Vec<(String, String, [u64; 2])> = series
+        let mut apps: Vec<AppRow> = series
             .app_totals
             .iter()
             .filter(|(_, v)| v[0] + v[1] > 0)
@@ -275,9 +287,9 @@ impl TrafficPage {
             .collect();
         let q = self.search.to_lowercase();
         apps.retain(|(_, n, _)| q.is_empty() || n.to_lowercase().contains(&q));
-        sort::apply(&mut apps, spec, |a, b, col| cmp_col(col, (&a.1, a.2[0], a.2[1]), (&b.1, b.2[0], b.2[1])), |r| r.1.as_str());
+        order_apps(&mut apps, spec);
         // Without admin there are no per-app byte counts; list connected apps by connection count.
-        let mut connected: Vec<(String, String, usize)> = Vec::new();
+        let mut connected: Vec<ConnRow> = Vec::new();
         if !s.admin {
             for (k, l) in &s.apps_live {
                 let n = l.in_conns + l.out_conns;
@@ -287,7 +299,7 @@ impl TrafficPage {
                 }
             }
             // no byte counts here: the connection count stands in for both number columns
-            sort::apply(&mut connected, spec, |a, b, col| cmp_col(col, (&a.1, a.2 as u64, a.2 as u64), (&b.1, b.2 as u64, b.2 as u64)), |r| r.1.as_str());
+            order_connected(&mut connected, spec);
         }
         let all: [u64; 2] = [series.down.iter().sum::<f64>() as u64, series.up.iter().sum::<f64>() as u64];
         let all = if self.selected.is_some() {
@@ -833,22 +845,50 @@ mod tests {
         assert!(strip_shows_counts(1300.0));
     }
 
-    fn rows() -> Vec<(String, u64, u64)> {
-        vec![("b".into(), 10, 1), ("A".into(), 5, 9), ("c".into(), 10, 3)]
+    fn row(n: &str, d: u64, u: u64) -> AppRow {
+        (format!("{n}.exe"), n.to_string(), [d, u])
     }
 
-    fn names(r: &[(String, u64, u64)]) -> Vec<&str> {
-        r.iter().map(|x| x.0.as_str()).collect()
+    fn rows() -> Vec<AppRow> {
+        vec![row("b", 10, 1), row("A", 5, 9), row("c", 10, 3)]
+    }
+
+    fn names(r: &[AppRow]) -> Vec<&str> {
+        r.iter().map(|x| x.1.as_str()).collect()
     }
 
     #[test]
     fn traffic_rows_sort() {
         let mut r = rows();
-        sort_rows(&mut r, SortSpec { col: 1, desc: true });
+        order_apps(&mut r, SortSpec { col: 1, desc: true });
         assert_eq!(names(&r), ["b", "c", "A"]);
-        sort_rows(&mut r, SortSpec { col: 0, desc: false });
+        order_apps(&mut r, SortSpec { col: 0, desc: false });
         assert_eq!(names(&r), ["A", "b", "c"]);
-        sort_rows(&mut r, SortSpec { col: 2, desc: true });
+        order_apps(&mut r, SortSpec { col: 2, desc: true });
         assert_eq!(names(&r), ["A", "c", "b"]);
+    }
+
+    #[test]
+    fn traffic_natural_default_is_total() {
+        let mut r = vec![row("a", 10, 1), row("b", 2, 20), row("c", 5, 5)];
+        order_apps(&mut r, NATURAL);
+        assert_eq!(names(&r), ["b", "a", "c"]);
+    }
+
+    #[test]
+    fn traffic_stale_col_resets_to_natural() {
+        assert_eq!(normalize(SortSpec { col: 7, desc: false }), NATURAL);
+        assert_eq!(normalize(NATURAL), NATURAL);
+        assert_eq!(normalize(SortSpec { col: 2, desc: false }), SortSpec { col: 2, desc: false });
+    }
+
+    #[test]
+    fn traffic_connected_order() {
+        let mk = |n: &str, c: usize| (format!("{n}.exe"), n.to_string(), c);
+        let mut r = vec![mk("b", 2), mk("a", 2), mk("z", 5)];
+        order_connected(&mut r, NATURAL);
+        assert_eq!(r.iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), ["z", "a", "b"]);
+        order_connected(&mut r, SortSpec { col: 0, desc: false });
+        assert_eq!(r.iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), ["a", "b", "z"]);
     }
 }
