@@ -1,7 +1,5 @@
 //! Activity log: first network activity, connectivity changes, app updates, new devices…
 
-use std::collections::HashSet;
-
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::motion;
@@ -35,22 +33,14 @@ pub struct LogPage {
     sort: usize,
     period: usize,
     search: String,
-    fresh: Option<HashSet<u64>>,
 }
 
 impl LogPage {
     pub fn show(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons, actions: &mut Vec<Action>) {
         let full = ui.max_rect();
-        // Remember what was unread when the page opened, then mark everything read.
-        let fresh = self.fresh.get_or_insert_with(|| s.store.data.events.iter().filter(|e| !e.read).map(|e| e.id).collect()).clone();
-        if s.store.data.events.iter().any(|e| !e.read) {
-            for e in s.store.data.events.iter_mut() {
-                e.read = true;
-            }
-            s.store.mark_dirty();
-        }
-
-        let mut clear = false;
+        // Events stay unread until their row is clicked or Mark all read is pressed.
+        let mut mark_all = false;
+        let mut clicked: Option<u64> = None;
         let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 72.0), Sense::hover());
         ui.painter().rect_filled(bar, CornerRadius::ZERO, c::panel());
         ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0_f32, c::border()));
@@ -74,16 +64,17 @@ impl LogPage {
         prefix_glyph(&mut b, Glyph::Clock, "Time period");
         theme::dropdown(&mut b, "log-period", &PERIODS, &mut self.period);
         b.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if theme::pill(ui, "Clear log", None, false).clicked() {
-                clear = true;
+            let unread = unread_important(&s.store.data.events);
+            let resp = ui.add_enabled_ui(unread > 0, |ui| theme::pill(ui, "Mark all read", None, false)).inner;
+            if resp.clicked() {
+                mark_all = true;
             }
+            resp.on_hover_text(if unread > 0 { "Clear the new-alert dots" } else { "No new alerts" });
             ui.add_space(4.0);
             theme::search_box(ui, &mut self.search, 300.0, "Search");
         });
-        if clear {
-            s.store.data.events.clear();
+        if mark_all && mark_all_read(&mut s.store.data.events) {
             s.store.mark_dirty();
-            self.fresh = Some(HashSet::new());
         }
 
         let now = chrono::Local::now();
@@ -154,7 +145,10 @@ impl LogPage {
                 let group = gr.shrink2(Vec2::new(40.0, 0.0));
                 for (k, e) in events[i..i + n].iter().enumerate() {
                     let card = Rect::from_min_size(Pos2::new(group.left(), group.top() + k as f32 * ROW_H), Vec2::new(group.width(), ROW_H));
-                    let resp = ui.interact(card, ui.id().with(("log-row", e.id)), Sense::hover());
+                    let resp = ui.interact(card, ui.id().with(("log-row", e.id)), Sense::click());
+                    if resp.clicked() {
+                        clicked = Some(e.id);
+                    }
                     let t = motion::hover(ui, resp.id, resp.hovered());
                     let p = ui.painter().clone();
                     p.rect_filled(card, CornerRadius::ZERO, theme::lerp_color(c::panel(), c::hover(), t));
@@ -163,7 +157,7 @@ impl LogPage {
                     }
                     let cy = card.center().y;
                     badge(&p, Pos2::new(card.left() + 44.0, cy), e.kind);
-                    if fresh.contains(&e.id) {
+                    if dot_shown(e) {
                         p.circle_filled(Pos2::new(card.left() + 14.0, cy), 4.0, c::accent());
                     }
 
@@ -174,7 +168,9 @@ impl LogPage {
                         icons.draw(ui, s, app, Rect::from_center_size(Pos2::new(x + 9.0, cy), Vec2::splat(18.0)), &name);
                         x += 26.0;
                         let ir = Rect::from_center_size(Pos2::new(x - 17.0, cy), Vec2::splat(18.0));
-                        app_popup::link(ui, ui.id().with(("log-app", e.id)), ir, Pos2::new(x, cy), &name, theme::semibold(14.5), max_x - x, app, actions);
+                        if app_popup::link(ui, ui.id().with(("log-app", e.id)), ir, Pos2::new(x, cy), &name, theme::semibold(14.5), max_x - x, app, actions) {
+                            clicked = Some(e.id);
+                        }
                         x = seg(&p, x, cy, &name, true, max_x);
                     }
                     for (t, bold) in segments(e) {
@@ -187,6 +183,42 @@ impl LogPage {
             }
             ui.add_space(24.0);
         });
+        if let Some(id) = clicked {
+            if mark_read(&mut s.store.data.events, id) {
+                s.store.mark_dirty();
+            }
+        }
+    }
+}
+
+/// Whether an event's row shows the "new" dot: unread and important.
+pub fn dot_shown(e: &Event) -> bool {
+    !e.read && e.kind.important()
+}
+
+/// How many important events are still unread.
+pub fn unread_important<'a>(events: impl IntoIterator<Item = &'a Event>) -> usize {
+    events.into_iter().filter(|e| dot_shown(e)).count()
+}
+
+/// Marks every event read. Returns whether anything changed.
+pub fn mark_all_read<'a>(events: impl IntoIterator<Item = &'a mut Event>) -> bool {
+    let mut changed = false;
+    for e in events {
+        changed |= !e.read;
+        e.read = true;
+    }
+    changed
+}
+
+/// Marks the event with `id` read. Returns whether anything changed.
+pub fn mark_read<'a>(events: impl IntoIterator<Item = &'a mut Event>, id: u64) -> bool {
+    match events.into_iter().find(|e| e.id == id) {
+        Some(e) if !e.read => {
+            e.read = true;
+            true
+        }
+        _ => false,
     }
 }
 
@@ -274,5 +306,58 @@ fn badge(p: &egui::Painter, center: Pos2, kind: EventKind) {
     }
     if let Some(t) = txt {
         p.text(center, Align2::CENTER_CENTER, t, theme::semibold(11.5), Color32::WHITE);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    fn ev(id: u64, kind: EventKind, read: bool) -> Event {
+        Event { id, t: 0, kind, app: None, subject: String::new(), read }
+    }
+
+    #[test]
+    fn dot_hidden_for_unread_firewall() {
+        assert!(!dot_shown(&ev(1, EventKind::Firewall, false)));
+    }
+
+    #[test]
+    fn dot_shown_for_unread_new_app() {
+        assert!(dot_shown(&ev(1, EventKind::NewApp, false)));
+        assert!(!dot_shown(&ev(2, EventKind::NewApp, true)));
+    }
+
+    #[test]
+    fn unread_counts_important_only() {
+        let events = vec![
+            ev(1, EventKind::NewApp, false),
+            ev(2, EventKind::Firewall, false),
+            ev(3, EventKind::DeviceLeft, false),
+            ev(4, EventKind::InternetDown, false),
+            ev(5, EventKind::Rdp, true),
+        ];
+        assert_eq!(unread_important(&events), 2);
+        assert_eq!(unread_important(&Vec::<Event>::new()), 0);
+    }
+
+    #[test]
+    fn mark_all_read_sets_all() {
+        let mut events: VecDeque<Event> = [ev(1, EventKind::NewApp, false), ev(2, EventKind::Firewall, false), ev(3, EventKind::Rdp, true)].into();
+        assert!(mark_all_read(&mut events));
+        assert!(events.iter().all(|e| e.read));
+        assert_eq!(unread_important(&events), 0);
+        assert!(!mark_all_read(&mut events), "nothing left to change");
+    }
+
+    #[test]
+    fn click_marks_one() {
+        let mut events: VecDeque<Event> = [ev(1, EventKind::NewApp, false), ev(2, EventKind::NewApp, false), ev(3, EventKind::Firewall, false)].into();
+        assert!(mark_read(&mut events, 2));
+        let read: Vec<bool> = events.iter().map(|e| e.read).collect();
+        assert_eq!(read, [false, true, false]);
+        assert!(!mark_read(&mut events, 2), "already read");
+        assert!(!mark_read(&mut events, 99), "unknown id");
     }
 }

@@ -214,6 +214,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                     });
                 });
                 let st = &mut s.store.data.settings;
+                let mut clear_log = false;
                 ui.add_space(20.0);
 
                 theme::label(ui, "APP", theme::semibold(12.0), c::muted());
@@ -244,6 +245,28 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
+                            theme::label(ui, "Clear activity log", theme::semibold(14.5), c::text());
+                            theme::label(ui, "Deletes every alert. This also removes the markers on the graph and each app's Alerts history.", theme::regular(13.0), c::muted());
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let id = ui.id().with("confirm-clear-log");
+                            let armed = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+                            if armed {
+                                if theme::pill(ui, "Cancel", None, false).clicked() {
+                                    ui.data_mut(|d| d.insert_temp(id, false));
+                                }
+                                if theme::primary_button(ui, "Yes, clear").clicked() {
+                                    clear_log = true;
+                                    ui.data_mut(|d| d.insert_temp(id, false));
+                                }
+                            } else if theme::pill(ui, "Clear…", None, false).clicked() {
+                                ui.data_mut(|d| d.insert_temp(id, true));
+                            }
+                        });
+                    });
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
                             theme::label(ui, "Data folder", theme::semibold(14.5), c::text());
                             theme::label(ui, s.store.dir.display().to_string(), theme::regular(13.0), c::muted());
                         });
@@ -254,8 +277,20 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                         });
                     });
                 });
+                if clear_log {
+                    s.store.data.events.clear();
+                    s.store.mark_dirty();
+                    s.toast = Some("Activity log cleared".into());
+                }
                 ui.add_space(20.0);
                 theme::label(ui, format!("Vantage {} · Rust + egui", env!("CARGO_PKG_VERSION")), theme::regular(12.5), c::faint());
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.hyperlink_to(egui::RichText::new("IP Geolocation by DB-IP").font(theme::regular(12.5)), "https://db-ip.com")
+                        .on_hover_text("https://db-ip.com · CC BY 4.0");
+                    theme::label(ui, " (CC BY 4.0) · Flags: flag-icons (MIT) · Font: Manrope (OFL)", theme::regular(12.5), c::faint());
+                });
                 ui.add_space(Vec2::splat(30.0).y);
                 if changed {
                     s.store.mark_dirty();
