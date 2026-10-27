@@ -32,7 +32,7 @@ fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color32 {
 }
 
 pub fn dark() -> Palette {
-    let glass_top = rgba(90, 140, 255, 28);
+    let glass_top = rgba(90, 140, 255, 10);
     Palette {
         bg: rgb(0x0a1426),
         bg_glow: rgb(0x143a72),
@@ -50,15 +50,15 @@ pub fn dark() -> Palette {
         warn: rgb(0xfbbf24),
         orange: rgb(0xfb923c),
         glass_top,
-        glass_bottom: rgba(255, 255, 255, 6),
-        glass_border: rgba(140, 180, 255, 36),
+        glass_bottom: rgba(255, 255, 255, 1),
+        glass_border: rgba(140, 180, 255, 16),
         shadow: rgba(0, 0, 0, 90),
         panel: glass_top,
-        raised: rgba(255, 255, 255, 13),
-        row_alt: rgba(255, 255, 255, 6),
-        hover: rgba(120, 170, 255, 26),
-        selected: rgba(60, 120, 255, 56),
-        border: rgba(140, 180, 255, 36),
+        raised: rgba(140, 170, 255, 4),
+        row_alt: rgba(120, 160, 255, 1),
+        hover: rgba(120, 170, 255, 8),
+        selected: rgba(60, 120, 255, 30),
+        border: rgba(140, 180, 255, 16),
         mesh_line: rgba(61, 139, 255, 30),
         mesh_node: rgba(127, 196, 255, 80),
         glow: rgba(60, 120, 255, 90),
