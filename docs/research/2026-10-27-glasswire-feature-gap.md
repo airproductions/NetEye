@@ -5,7 +5,53 @@ Sources: ~1,150 UI strings from GlassWire's translation file (inferred features,
 Legend for effort: S = under a day, M = a few days, L = a week or more / architectural.
 Flags: [DRIVER] needs a kernel driver, [CLOUD] needs a cloud service/server, [ACCT] needs an account, [KEY] needs an API key or paid service.
 
-What Vantage is today (confirmed in code): 6 pages (Traffic, Firewall, Activity, Scanner, Hardware, Settings; `ui/mod.rs:243-249`), per-app in/out block via persistent WFP filters (`wfp.rs:148`, `system.rs:36`), 7 event kinds (`store.rs` `EventKind`: NewApp, InternetUp, InternetDown, VersionChanged, NewDevice, Firewall, DataCap), 5 notification toggles (`ui/settings.rs:70-74`), tray with Open/Quit (`ui/mod.rs:480-523`), 24 h of per-minute and 32 days of per-hour buckets (`store.rs:10-11`).
+## Status refresh (2026-10-27, evening; app now named NetEye)
+
+Re-checked against the code at `classic-graphite`. The tables below are the morning snapshot; this list supersedes them.
+
+**Built since the morning report:** scale menu and pause (G6, G7), group/network/direction filters (G8), countries with flags (G11 view), traffic types (G12), bits/bytes (G17), Ask to Connect and Block All modes (F3, F4), firewall profiles (F6), Allow all in the app popup (F7), 75% plan warning with day/week/month periods (A4), device left/joined (A5), filter by alert type, sort, Mark all read (A8, A9, A11), snooze (A13), usage tables by host/type/country (U1), data plan (U2), All Time/Day/Week/Month/Custom (U3), CSV export (U4), exclude LAN from plan (U5), scan interval (N4), rename devices (N6), ARP spoofing, DNS, proxy and RDP monitors (S2, S5, S12, S13), VirusTotal hash lookup (S6), app details popup with path menu (D1, D2), host countries (D9), run on startup (T4), host/country popups, column choosers, scanner network picker.
+
+**Still missing** (excluding the Skip rows: premium, remote servers, community stats, credential check):
+
+| Area | Feature | Effort |
+|---|---|---|
+| Graph | Live connections page (G9; today: Connected now list + firewall row expansion) | M |
+| Graph | Live world map (G10) | L |
+| Graph | Block by country (G11, blocking half) | L |
+| Graph | Save graph as image (G16) | S |
+| Graph | Graph colour themes (G18) | S |
+| Firewall | Uninstalled section and remove old apps (F8, F9) | S |
+| Firewall | Guard NetEye itself and Defender from blocks (F12) | S |
+| Firewall | Warn when Windows Firewall is off (F13) | S |
+| Firewall | Settings/firewall password (F14, T11) | M |
+| Firewall | Custom IP/host/port rules (F17) | M |
+| Alerts | Delete a single alert (A10) | S |
+| Alerts | While You Were Away summary (A12) | M |
+| Alerts | Mirror to Windows Event Log (A15, T10) | S |
+| Alerts | Alert retention setting (A16; fixed 2,000) | S |
+| Things | Forget device (N7) | S |
+| Things | Trust devices, alert only on unknown ones (N8, N9) | S |
+| Things | Device type override (N6, second half) | S |
+| Things | Network info: DNS servers, saved Wi-Fi (N10) | M |
+| Security | Suspicious host list (S1) | L |
+| Security | Evil twin / open Wi-Fi alerts (S3, S4) | M |
+| Security | Camera and microphone use (S7) | M |
+| Security | Executable changed, publisher changed, signature lost (S8, S9, S10) | M |
+| Security | hosts file monitor (S14) | S |
+| Security | New network adapter/driver alert (S15) | M |
+| App details | Hide app, Incognito, Trust app (D3, D4, D5) | S–M |
+| App details | Search online (D6) | S |
+| App details | Signed/unsigned status (D7) | M |
+| Tray | Mini Viewer with always-on-top (M2, M3) | M |
+| Tray | Tray menu actions: firewall mode, snooze, mini viewer (M6) | S |
+| Settings | Language selection (T1) | M |
+| Settings | Text size (T3) | S |
+| Settings | Update check / auto-update (T5, T6, A17) | M |
+| Settings | 24-hour clock option (T8) | S |
+| Settings | History retention setting (T9) | S |
+| Usage | Clear history for a date range (U6) | S |
+
+What Vantage was in the morning (confirmed in code): 6 pages (Traffic, Firewall, Activity, Scanner, Hardware, Settings; `ui/mod.rs:243-249`), per-app in/out block via persistent WFP filters (`wfp.rs:148`, `system.rs:36`), 7 event kinds (`store.rs` `EventKind`: NewApp, InternetUp, InternetDown, VersionChanged, NewDevice, Firewall, DataCap), 5 notification toggles (`ui/settings.rs:70-74`), tray with Open/Quit (`ui/mod.rs:480-523`), 24 h of per-minute and 32 days of per-hour buckets (`store.rs:10-11`).
 
 ---
 
