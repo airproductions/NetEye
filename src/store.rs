@@ -604,6 +604,7 @@ impl Store {
 
     /// Saves now, on the calling thread. Prefer `snapshot` under the shared lock and
     /// `write_snapshot` after releasing it.
+    #[cfg(test)]
     pub fn save(&mut self) {
         if let Some((dir, gen, data)) = self.snapshot() {
             Self::write_snapshot(&dir, gen, &data);

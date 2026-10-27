@@ -175,6 +175,7 @@ impl eframe::App for VantageApp {
         if ctx.input(|i| i.viewport().close_requested()) && close_to_tray && !quitting {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.monitor.save();
         }
         if quitting {
             self.monitor.save();
