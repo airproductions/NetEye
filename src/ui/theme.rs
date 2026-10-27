@@ -233,6 +233,8 @@ pub enum Glyph {
     Lock,
     Export,
     Columns,
+    Pause,
+    Play,
     Calendar,
     BellPlus,
     TypeWeb,
@@ -484,6 +486,14 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
             for x in [3.0, 8.5, 14.0] {
                 p.rect_stroke(Rect::from_min_max(pt(x, 3.5), pt(x + 3.0, 16.5)), CornerRadius::same(1), s, StrokeKind::Middle);
             }
+        }
+        Glyph::Pause => {
+            for x in [6.5, 13.5] {
+                p.rect_filled(Rect::from_min_max(pt(x - 1.6, 4.0), pt(x + 1.6, 16.0)), CornerRadius::same(1), color);
+            }
+        }
+        Glyph::Play => {
+            p.add(Shape::convex_polygon(vec![pt(6.0, 4.0), pt(16.0, 10.0), pt(6.0, 16.0)], color, Stroke::NONE));
         }
     }
 }
@@ -1061,3 +1071,4 @@ mod tests {
         assert_eq!(f.families[&FontFamily::Name("bold".into())][0], "manrope-b");
     }
 }
+
