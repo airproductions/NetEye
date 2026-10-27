@@ -315,6 +315,8 @@ pub struct Row {
     pub apps: Vec<String>,
     /// Hosts rows: apps beyond `apps`.
     pub more_apps: usize,
+    /// Hosts rows: every app that used the host, [down, up], most bytes first (the host popup).
+    pub app_bytes: Vec<(String, [u64; 2])>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -636,7 +638,8 @@ struct Split {
 struct HostCell {
     cc: Option<u32>,
     v: [u64; 2],
-    apps: Vec<(u32, u64)>,
+    /// (app, [down, up]) for every app that used this host.
+    apps: Vec<(u32, [u64; 2])>,
 }
 
 /// Running sums for one `aggregate` call, indexed by interned id.
@@ -802,13 +805,12 @@ impl<'a> Acc<'a> {
         };
         add2(&mut cell.v, v);
         if let Some(app) = app {
-            let b = v[0].saturating_add(v[1]);
             // Most hosts see one app; check the first entry before scanning.
             match cell.apps.first_mut() {
-                Some(x) if x.0 == app => x.1 = x.1.saturating_add(b),
+                Some(x) if x.0 == app => add2(&mut x.1, v),
                 _ => match cell.apps.iter_mut().find(|x| x.0 == app) {
-                    Some(x) => x.1 = x.1.saturating_add(b),
-                    None => cell.apps.push((app, b)),
+                    Some(x) => add2(&mut x.1, v),
+                    None => cell.apps.push((app, v)),
                 },
             }
         }
@@ -1038,16 +1040,18 @@ impl<'a> Acc<'a> {
         for (h, cells) in self.hosts.iter_mut().enumerate() {
             let h = h as u32;
             for c in cells.iter_mut() {
-                c.apps.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| ix.str(a.0).cmp(ix.str(b.0))));
+                let sum = |v: &[u64; 2]| v[0].saturating_add(v[1]);
+                c.apps.sort_by(|a, b| sum(&b.1).cmp(&sum(&a.1)).then_with(|| ix.str(a.0).cmp(ix.str(b.0))));
                 let more_apps = c.apps.len().saturating_sub(HOST_APPS);
                 let apps = c.apps.iter().take(HOST_APPS).map(|(a, _)| ix.str(*a).to_string()).collect();
+                let app_bytes = c.apps.iter().map(|(a, v)| (ix.str(*a).to_string(), *v)).collect();
                 let cc = c.cc.map(|i| ix.str(i).to_string());
                 let (key, label) = match h {
                     ID_NO_HOST => (NO_HOST.to_string(), NO_HOST_LABEL.to_string()),
                     ID_UNCL => (UNCLASSIFIED.to_string(), ports::label(UNCLASSIFIED)),
                     _ => (format!("{}|{}", ix.str(h), cc.as_deref().unwrap_or("")), ix.str(h).to_string()),
                 };
-                hosts.push(Row { key, label, down: c.v[0], up: c.v[1], cc, apps, more_apps, ..Default::default() });
+                hosts.push(Row { key, label, down: c.v[0], up: c.v[1], cc, apps, more_apps, app_bytes, ..Default::default() });
             }
         }
         agg.hosts = sorted(hosts);

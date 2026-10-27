@@ -10,6 +10,7 @@ use eframe::egui::{self, Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Ve
 
 use super::csv_export::ExportRow;
 use super::flags;
+use super::host_popup::{self, Detail};
 use super::sort::{self, SortSpec};
 use super::theme::{self, c, Glyph, Icons};
 use super::traffic_data::{Agg, Row, NO_HOST};
@@ -97,6 +98,9 @@ fn state_id() -> egui::Id {
 
 /// Collapses every column when `key` (range and selection) differs from the last one seen.
 pub fn sync(ctx: &egui::Context, key: u64) {
+    if ctx.data(|d| d.get_temp::<State>(state_id())).is_some_and(|st| st.key != key) {
+        host_popup::close(ctx);
+    }
     ctx.data_mut(|d| {
         let st = d.get_temp_mut_or_default::<State>(state_id());
         if st.key != key {
@@ -125,6 +129,7 @@ pub fn show(ui: &mut Ui, agg: &Agg, s: &mut Shared, icons: &mut Icons, actions: 
         column(&mut cui, i, column_rows(agg, i), s, icons, &mut st.expanded[i]);
     }
     ui.ctx().data_mut(|d| d.insert_temp(state_id(), st));
+    host_popup::show(ui, agg, s, icons);
 }
 
 fn column(ui: &mut Ui, i: usize, rows: &[Row], s: &mut Shared, icons: &mut Icons, expanded: &mut bool) {
@@ -160,7 +165,12 @@ fn column(ui: &mut Ui, i: usize, rows: &[Row], s: &mut Shared, icons: &mut Icons
         egui::ScrollArea::vertical().id_salt(("usage-scroll", i)).auto_shrink([false, false]).show_rows(&mut bui, ROW_H, n, |ui, range| {
             for j in range {
                 match vis.get(j) {
-                    Some(row) => draw_row(ui, i, row, max, s, icons),
+                    Some(row) => {
+                        if let Some(at) = draw_row(ui, i, row, max, s, icons) {
+                            let what = if i == 0 { Detail::Host(row.key.clone()) } else { Detail::Country(row.key.clone()) };
+                            host_popup::open(ui.ctx(), what, at);
+                        }
+                    }
                     None => {
                         if let Some((count, bytes)) = more {
                             if more_row(ui, count, bytes) {
@@ -180,8 +190,16 @@ fn column(ui: &mut Ui, i: usize, rows: &[Row], s: &mut Shared, icons: &mut Icons
     }
 }
 
-fn draw_row(ui: &mut Ui, col: usize, row: &Row, max: u64, s: &mut Shared, icons: &mut Icons) {
-    let (rr, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::hover());
+/// Returns where the pointer was when a Hosts or Countries row was clicked (its popup opens there).
+fn draw_row(ui: &mut Ui, col: usize, row: &Row, max: u64, s: &mut Shared, icons: &mut Icons) -> Option<Pos2> {
+    // hosts and real countries open a popup; traffic types, "no host" and unclassified don't
+    let opens = match col {
+        0 => row.key != NO_HOST,
+        2 => row.cc.is_some(),
+        _ => false,
+    };
+    let (rr, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), if opens { Sense::click() } else { Sense::hover() });
+    let resp = if opens { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };
     if resp.hovered() {
         ui.painter().rect_filled(rr, CornerRadius::same(4), c::hover());
     }
@@ -226,7 +244,10 @@ fn draw_row(ui: &mut Ui, col: usize, row: &Row, max: u64, s: &mut Shared, icons:
     if wu >= 0.5 {
         p.rect_filled(Rect::from_min_size(Pos2::new(track.left() + wd, track.top()), Vec2::new(wu, track.height())), CornerRadius::same(1), c::up());
     }
+    let clicked = resp.clicked();
+    let at = resp.interact_pointer_pos();
     resp.on_hover_text(format!("{}\n↓ {}   ↑ {}", row.label, theme::bytes(row.down), theme::bytes(row.up)));
+    if clicked { at.or(Some(rr.right_center())) } else { None }
 }
 
 /// The collapsed tail. Returns true when clicked.

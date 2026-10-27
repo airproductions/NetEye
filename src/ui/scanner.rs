@@ -77,8 +77,25 @@ impl ScannerPage {
         let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 72.0), Sense::hover());
         ui.painter().rect_filled(bar, CornerRadius::ZERO, c::panel());
         let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(24.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        let adapter = s.adapters.first().map(|a| format!("{}  ·  {}", a.kind, a.description)).unwrap_or_else(|| "No active adapter".into());
-        theme::pill(&mut b, &adapter, Some(Glyph::Scanner), false);
+        // which network to scan: Automatic, or one adapter's subnet
+        let mut options = vec!["Automatic network".to_string()];
+        options.extend(s.lans.iter().map(|l| l.label()));
+        let pick = &s.store.data.settings.scan_adapter;
+        let mut sel = s.lans.iter().position(|l| &l.mac == pick).map_or(0, |i| i + 1);
+        if !pick.is_empty() && sel == 0 {
+            // the saved adapter is gone (unplugged, Wi-Fi off): say so instead of silently switching
+            options.push("Saved network (not connected)".into());
+            sel = options.len() - 1;
+        }
+        let refs: Vec<&str> = options.iter().map(String::as_str).collect();
+        theme::glyph(b.painter(), Rect::from_center_size(b.cursor().min + Vec2::new(9.0, 18.0), Vec2::splat(16.0)), Glyph::Scanner, c::muted());
+        b.add_space(22.0);
+        let before = sel;
+        if theme::dropdown(&mut b, "scan-network", &refs, &mut sel) && sel != before {
+            let mac = if sel == 0 { String::new() } else { s.lans.get(sel - 1).map(|l| l.mac.clone()).unwrap_or_else(|| pick.clone()) };
+            s.store.data.settings.scan_adapter = mac;
+            s.store.mark_dirty();
+        }
         b.add_space(6.0);
         if s.scanning {
             b.add(egui::Spinner::new().size(18.0).color(c::accent()));

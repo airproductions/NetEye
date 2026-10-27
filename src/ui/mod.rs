@@ -3,6 +3,7 @@ mod csv_export;
 mod flags;
 mod firewall;
 mod hardware;
+mod host_popup;
 mod log;
 mod markers;
 mod motion;

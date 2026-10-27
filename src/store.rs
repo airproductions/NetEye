@@ -96,6 +96,8 @@ pub struct Settings {
     pub close_on_block: bool,
     pub firewall_enabled: bool,
     pub auto_scan: bool,
+    /// MAC of the adapter whose network the scanner sweeps; empty picks one automatically.
+    pub scan_adapter: String,
     pub appearance: Appearance,
     pub scan_minutes: u32,
     /// Also log known devices rejoining and devices leaving the network.
@@ -152,6 +154,7 @@ impl Default for Settings {
             close_on_block: false,
             firewall_enabled: true,
             auto_scan: true,
+            scan_adapter: String::new(),
             appearance: Appearance::System,
             scan_minutes: 5,
             notify_device_presence: false,

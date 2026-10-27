@@ -63,15 +63,16 @@ impl LogPage {
         b.add_space(10.0);
         prefix_glyph(&mut b, Glyph::Clock, "Time period");
         theme::dropdown(&mut b, "log-period", &PERIODS, &mut self.period);
+        // right to left: search at the edge, Mark all read to its left
         b.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            theme::search_box(ui, &mut self.search, 300.0, "Search");
+            ui.add_space(8.0);
             let unread = unread_important(&s.store.data.events);
             let resp = ui.add_enabled_ui(unread > 0, |ui| theme::pill(ui, "Mark all read", None, false)).inner;
             if resp.clicked() {
                 mark_all = true;
             }
             resp.on_hover_text(if unread > 0 { "Clear the new-alert dots" } else { "No new alerts" });
-            ui.add_space(4.0);
-            theme::search_box(ui, &mut self.search, 300.0, "Search");
         });
         if mark_all && mark_all_read(&mut s.store.data.events) {
             s.store.mark_dirty();

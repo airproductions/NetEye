@@ -150,6 +150,8 @@ pub struct Shared {
     pub apps_live: HashMap<String, AppLive>,
     pub meta: HashMap<String, AppMeta>,
     pub adapters: Vec<Adapter>,
+    /// Networks the scanner can sweep (refreshed every 10 s).
+    pub lans: Vec<system::Lan>,
     pub hw: Hardware,
     pub names: HashMap<IpAddr, String>,
     pub internet: Option<bool>,
@@ -205,6 +207,7 @@ impl Monitor {
             apps_live: HashMap::new(),
             meta: HashMap::new(),
             adapters: Vec::new(),
+            lans: Vec::new(),
             hw: Hardware::default(),
             names: HashMap::new(),
             internet: None,
@@ -510,6 +513,8 @@ impl Monitor {
                     self.check_gateway(&gw.to_string(), &mac);
                 }
             }
+            let lans = system::lans();
+            self.lock().lans = lans;
             tick += 1;
             std::thread::sleep(Duration::from_secs(10));
         }
@@ -582,7 +587,8 @@ impl Monitor {
 
     fn scan(&self, oui: &HashMap<String, String>, baseline: bool) {
         self.lock().scanning = true;
-        let lan = system::lan();
+        let pick = self.lock().store.data.settings.scan_adapter.clone();
+        let lan = system::lan_for(&pick);
         let gw = lan.as_ref().and_then(|l| l.gateway);
         let me_ip = lan.as_ref().map(|l| l.ip);
         let mut found = lan.as_ref().map(system::scan_subnet).unwrap_or_default();

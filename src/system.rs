@@ -155,6 +155,9 @@ pub struct Lan {
     pub mask: Ipv4Addr,
     pub gateway: Option<Ipv4Addr>,
     pub mac: String,
+    /// The adapter's description and kind, for the network picker.
+    pub name: String,
+    pub kind: &'static str,
 }
 
 fn ipv4_table<F: Fn(*mut u8, *mut u32) -> u32>(f: F) -> Vec<u8> {
@@ -178,10 +181,37 @@ fn v4(b: &[u8], o: usize) -> Ipv4Addr {
     Ipv4Addr::new(b[o], b[o + 1], b[o + 2], b[o + 3])
 }
 
+/// The network to scan: the adapter with MAC `pick` when it has one, else the best guess
+/// (the first adapter with a default gateway).
+pub fn lan_for(pick: &str) -> Option<Lan> {
+    let all = lans();
+    if !pick.is_empty() {
+        if let Some(l) = all.iter().find(|l| l.mac == pick) {
+            return Some(l.clone());
+        }
+    }
+    best_lan(all)
+}
+
 pub fn lan() -> Option<Lan> {
+    best_lan(lans())
+}
+
+fn best_lan(all: Vec<Lan>) -> Option<Lan> {
+    let mut best: Option<Lan> = None;
+    for lan in all {
+        if best.is_none() || (best.as_ref().unwrap().gateway.is_none() && lan.gateway.is_some()) {
+            best = Some(lan);
+        }
+    }
+    best
+}
+
+/// Every physical adapter with an IPv4 network, for the scanner's network picker.
+pub fn lans() -> Vec<Lan> {
     let addrs = ipv4_table(|p, s| unsafe { GetIpAddrTable(p as *mut _, s, 0) });
     let routes = ipv4_table(|p, s| unsafe { GetIpForwardTable(p as *mut _, s, 0) });
-    let mut best: Option<Lan> = None;
+    let mut out = Vec::new();
     for a in crate::net::adapters() {
         let mut ip_mask = None;
         if addrs.len() >= 4 {
@@ -212,12 +242,18 @@ pub fn lan() -> Option<Lan> {
                 }
             }
         }
-        let lan = Lan { ip, mask, gateway, mac: a.mac.clone() };
-        if best.is_none() || (best.as_ref().unwrap().gateway.is_none() && lan.gateway.is_some()) {
-            best = Some(lan);
-        }
+        out.push(Lan { ip, mask, gateway, mac: a.mac.clone(), name: a.description.clone(), kind: a.kind });
     }
-    best
+    out
+}
+
+impl Lan {
+    /// "Wi-Fi · Intel AX211 · 192.168.1.0/24"
+    pub fn label(&self) -> String {
+        let bits = u32::from(self.mask).count_ones();
+        let net = Ipv4Addr::from(u32::from(self.ip) & u32::from(self.mask));
+        format!("{} · {} · {net}/{bits}", self.kind, self.name)
+    }
 }
 
 fn as_ipaddr(ip: Ipv4Addr) -> u32 {
@@ -385,4 +421,15 @@ pub fn load_oui(dir: &Path) -> HashMap<String, String> {
         }
     }
     map
+}
+
+#[cfg(test)]
+mod lan_tests {
+    use super::*;
+
+    #[test]
+    fn lan_label_shows_subnet() {
+        let l = Lan { ip: Ipv4Addr::new(192, 168, 1, 23), mask: Ipv4Addr::new(255, 255, 255, 0), gateway: None, mac: "m".into(), name: "Intel AX211".into(), kind: "Wi-Fi" };
+        assert_eq!(l.label(), "Wi-Fi · Intel AX211 · 192.168.1.0/24");
+    }
 }
