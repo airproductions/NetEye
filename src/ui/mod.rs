@@ -1,7 +1,10 @@
 mod app_popup;
+mod csv_export;
+mod flags;
 mod firewall;
 mod hardware;
 mod log;
+mod markers;
 mod motion;
 pub mod palette;
 mod scanner;
@@ -9,6 +12,8 @@ mod settings;
 mod sort;
 pub mod theme;
 mod traffic;
+mod traffic_data;
+mod usage_view;
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};

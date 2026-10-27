@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod diag;
+mod geo;
 mod hw;
 mod monitor;
 mod net;
+mod ports;
 mod store;
 mod system;
 mod ui;
