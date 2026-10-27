@@ -117,6 +117,12 @@ pub struct Settings {
     pub event_log: bool,
     /// Alert when the hosts file (System32\drivers\etc\hosts) changes.
     pub monitor_hosts: bool,
+    /// Alert when an app's file, publisher or signature changes.
+    pub monitor_apps: bool,
+    /// Alert when an app starts using the camera or microphone.
+    pub monitor_camera: bool,
+    /// Alert when a new network adapter appears (VPNs, virtual switches, USB dongles).
+    pub monitor_adapters: bool,
     pub appearance: Appearance,
     pub scan_minutes: u32,
     /// Also log known devices rejoining and devices leaving the network.
@@ -205,6 +211,9 @@ impl Default for Settings {
             event_limit: MAX_EVENTS as u32,
             event_log: false,
             monitor_hosts: true,
+            monitor_apps: true,
+            monitor_camera: true,
+            monitor_adapters: true,
             appearance: Appearance::System,
             scan_minutes: 5,
             notify_device_presence: false,
@@ -251,6 +260,22 @@ pub struct AppRecord {
     pub hosts: Vec<String>,
     /// Hidden from the app lists (its traffic still counts in totals).
     pub hidden: bool,
+    /// What the executable looked like at the last check (integrity monitor).
+    pub file: Option<FileFacts>,
+}
+
+/// An app's executable at one point in time, to notice changes to it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct FileFacts {
+    pub size: u64,
+    /// Last-modified time, unix seconds.
+    pub mtime: i64,
+    pub sha256: String,
+    pub signed: bool,
+    /// CompanyName and version from the file's version resource.
+    pub publisher: Option<String>,
+    pub version: Option<String>,
 }
 
 impl AppRecord {
@@ -580,6 +605,12 @@ pub enum EventKind {
     ProxyChanged,
     Rdp,
     HostsChanged,
+    ExeChanged,
+    PublisherChanged,
+    SignatureLost,
+    CameraUsed,
+    MicUsed,
+    NewAdapter,
 }
 
 impl EventKind {
@@ -597,6 +628,9 @@ impl EventKind {
             Self::ProxyChanged => "Proxy settings monitor",
             Self::Rdp => "RDP detection",
             Self::HostsChanged => "Hosts file monitor",
+            Self::ExeChanged | Self::PublisherChanged | Self::SignatureLost => "Application info monitor",
+            Self::CameraUsed | Self::MicUsed => "Camera and microphone monitor",
+            Self::NewAdapter => "Network device monitor",
         }
     }
     pub fn important(self) -> bool {
@@ -638,6 +672,8 @@ pub struct Data {
     pub proxy: Option<String>,
     /// SHA-256 of the hosts file at the last check.
     pub hosts_hash: Option<String>,
+    /// Network adapters seen so far (interface GUIDs); a new one raises an alert.
+    pub known_adapters: Vec<String>,
     pub profiles: BTreeMap<String, Profile>,
     pub active_profile: Option<String>,
     next_event: u64,

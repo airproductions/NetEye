@@ -366,6 +366,82 @@ pub fn windows_firewall_off() -> bool {
     })
 }
 
+/// Apps using a capability ("webcam" or "microphone") right now, as (record key, display name),
+/// read from the per-user privacy usage records Windows keeps (Settings → Privacy shows the same).
+pub fn capability_in_use(cap: &str) -> Vec<(String, String)> {
+    use windows_sys::Win32::System::Registry::{RegCloseKey, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_READ, RRF_RT_REG_QWORD};
+    let base = format!(r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\{cap}");
+    // SAFETY: keys opened here are closed before returning; buffers are sized for registry names.
+    let subkeys = |path: &str| -> Vec<String> {
+        let mut out = Vec::new();
+        unsafe {
+            let mut h: HKEY = std::ptr::null_mut();
+            if RegOpenKeyExW(HKEY_CURRENT_USER, crate::net::wide(path).as_ptr(), 0, KEY_READ, &mut h) != 0 {
+                return out;
+            }
+            for i in 0.. {
+                let mut buf = [0u16; 512];
+                let mut len = buf.len() as u32;
+                if RegEnumKeyExW(h, i, buf.as_mut_ptr(), &mut len, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) != 0 {
+                    break;
+                }
+                out.push(String::from_utf16_lossy(&buf[..len as usize]));
+            }
+            RegCloseKey(h);
+        }
+        out
+    };
+    let qword = |path: &str, value: &str| -> u64 {
+        let mut v: u64 = 0;
+        let mut size = 8u32;
+        let (k, n) = (crate::net::wide(path), crate::net::wide(value));
+        let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), RRF_RT_REG_QWORD, std::ptr::null_mut(), &mut v as *mut u64 as *mut _, &mut size) };
+        if rc == 0 { v } else { 0 }
+    };
+    let in_use = |path: &str| {
+        let (start, stop) = (qword(path, "LastUsedTimeStart"), qword(path, "LastUsedTimeStop"));
+        start != 0 && start > stop
+    };
+    let mut out = Vec::new();
+    for app in subkeys(&base) {
+        if app == "NonPackaged" {
+            // desktop programs: the key is the exe path with '#' for '\'
+            for exe in subkeys(&format!(r"{base}\NonPackaged")) {
+                if in_use(&format!(r"{base}\NonPackaged\{exe}")) {
+                    let path = exe.replace('#', "\\");
+                    let name = Path::new(&path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or(path.clone());
+                    out.push((exe, name));
+                }
+            }
+        } else if in_use(&format!(r"{base}\{app}")) {
+            // Store apps: "Publisher.AppName_hash" -> "AppName"
+            let name = app.split('_').next().unwrap_or(&app).rsplit('.').next().unwrap_or(&app).to_string();
+            out.push((app, name));
+        }
+    }
+    out
+}
+
+/// SHA-256 of a file, streamed; None when unreadable or larger than `max` bytes.
+pub fn file_sha256(path: &str, max: u64) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    if f.metadata().ok()?.len() > max {
+        return None;
+    }
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Some(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// SHA-256 of the hosts file, or None when it can't be read.
 pub fn hosts_file_hash() -> Option<String> {
     use sha2::{Digest, Sha256};

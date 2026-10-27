@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use crate::hw::{ProcSample, Sampler, SystemSample};
 use crate::net::{self, Adapter, Conn, Proto, TcpState};
-use crate::store::{self, AppRecord, DeviceRecord, EventKind, FirewallMode, Store};
+use crate::store::{self, AppRecord, DeviceRecord, EventKind, FileFacts, FirewallMode, Store};
 use crate::system::{self, Dir};
 
 pub const LIVE_SECONDS: usize = 3600;
@@ -253,6 +253,8 @@ impl Monitor {
         std::thread::spawn(move || scan.scan_loop());
         let sec = m.clone();
         std::thread::spawn(move || sec.security_loop());
+        let watch = m.clone();
+        std::thread::spawn(move || watch.integrity_loop());
         m
     }
 
@@ -477,6 +479,100 @@ impl Monitor {
 
     // -----------------------------------------------------------------------------------------
     // Security monitors: DNS servers, proxy settings and the gateway's MAC (ARP spoofing)
+
+    /// Camera and microphone (every 10 s), new adapters (30 s) and app files (60 s).
+    fn integrity_loop(&self) {
+        let mut tick: u64 = 0;
+        // None until the first look: things already in use or present at start aren't news
+        let mut cam: Option<HashSet<String>> = None;
+        let mut mic: Option<HashSet<String>> = None;
+        loop {
+            let st = self.lock().store.data.settings.clone();
+            if st.monitor_camera {
+                for (cap, seen, kind, what) in [("webcam", &mut cam, EventKind::CameraUsed, "camera"), ("microphone", &mut mic, EventKind::MicUsed, "microphone")] {
+                    let now = system::capability_in_use(cap);
+                    let ids: HashSet<String> = now.iter().map(|(k, _)| k.clone()).collect();
+                    if let Some(before) = seen.as_ref() {
+                        for (id, name) in &now {
+                            if !before.contains(id) {
+                                self.lock().store.add_event(kind, None, name.clone());
+                                if st.notifications {
+                                    notify(&format!("{name} started using the {what}"));
+                                }
+                            }
+                        }
+                    }
+                    *seen = Some(ids);
+                }
+            }
+            if st.monitor_adapters && tick % 3 == 0 {
+                let now = net::interfaces();
+                let mut s = self.lock();
+                let fresh = new_adapters(&s.store.data.known_adapters, &now);
+                let first = s.store.data.known_adapters.is_empty();
+                if !fresh.is_empty() {
+                    for (id, desc) in fresh {
+                        if !first {
+                            s.store.add_event(EventKind::NewAdapter, None, desc.clone());
+                            if st.notifications {
+                                notify(&format!("New network adapter: {desc}"));
+                            }
+                        }
+                        s.store.data.known_adapters.push(id);
+                    }
+                    s.store.mark_dirty();
+                }
+            }
+            if st.monitor_apps && tick % 6 == 0 {
+                self.check_app_files(st.notifications);
+            }
+            tick += 1;
+            std::thread::sleep(Duration::from_secs(10));
+        }
+    }
+
+    /// Re-reads app executables whose size or modified time changed (at most 20 a pass, so the
+    /// first baseline is spread out) and reports changes worth a look.
+    fn check_app_files(&self, notifications: bool) {
+        let week_ago = store::now() - 7 * 86_400;
+        let todo: Vec<(String, String, Option<FileFacts>)> = {
+            let s = self.lock();
+            s.store.data.apps.iter().filter(|(_, a)| a.last_seen >= week_ago).filter_map(|(k, a)| Some((k.clone(), a.path.clone()?, a.file.clone()))).collect()
+        };
+        let mut done = 0;
+        for (key, path, before) in todo {
+            let Ok(md) = std::fs::metadata(&path) else { continue };
+            let mtime = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs() as i64);
+            if before.as_ref().is_some_and(|b| b.size == md.len() && b.mtime == mtime) {
+                continue;
+            }
+            if done >= 20 {
+                break;
+            }
+            done += 1;
+            let Some(sha256) = system::file_sha256(&path, 1 << 30) else { continue };
+            let info = net::version_info(&path);
+            let after = FileFacts { size: md.len(), mtime, sha256, signed: crate::sign::is_signed(&path), publisher: info.company, version: info.version };
+            let events = integrity_events(before.as_ref(), &after);
+            let mut s = self.lock();
+            let name = s.app_name(&key);
+            for (kind, subject) in events {
+                let msg = match kind {
+                    EventKind::PublisherChanged => format!("{name}'s publisher changed: {subject}"),
+                    EventKind::SignatureLost => format!("{name} is no longer validly signed"),
+                    _ => format!("{name} changed on disk without a new version"),
+                };
+                s.store.add_event(kind, Some(key.clone()), subject);
+                if notifications {
+                    notify(&msg);
+                }
+            }
+            if let Some(rec) = s.store.data.apps.get_mut(&key) {
+                rec.file = Some(after);
+                s.store.mark_dirty();
+            }
+        }
+    }
 
     fn security_loop(&self) {
         let mut tick: u64 = 0;
@@ -1101,6 +1197,34 @@ fn resolve(pid: u32, exe: &str, checked: &mut HashSet<String>) -> (String, Optio
     }
 }
 
+/// What a changed executable is worth reporting, compared with the last look (none on the first).
+/// A new version explains a new file, so only a same-version change is "changed"; a publisher
+/// swap and a lost signature are reported either way.
+fn integrity_events(before: Option<&FileFacts>, after: &FileFacts) -> Vec<(EventKind, String)> {
+    let Some(b) = before else { return Vec::new() };
+    if b.sha256 == after.sha256 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let (Some(old), Some(new)) = (&b.publisher, &after.publisher) {
+        if old.trim() != new.trim() {
+            out.push((EventKind::PublisherChanged, format!("{} → {}", old.trim(), new.trim())));
+        }
+    }
+    if b.signed && !after.signed {
+        out.push((EventKind::SignatureLost, "no valid digital signature".into()));
+    }
+    if b.version == after.version {
+        out.push((EventKind::ExeChanged, after.version.clone().unwrap_or_default()));
+    }
+    out
+}
+
+/// Interfaces in `now` that aren't in `known`.
+fn new_adapters(known: &[String], now: &[(String, String)]) -> Vec<(String, String)> {
+    now.iter().filter(|(id, _)| !known.contains(id)).cloned().collect()
+}
+
 fn notify(body: &str) {
     if store::now() < SNOOZE_UNTIL.load(Ordering::Relaxed) {
         return;
@@ -1114,6 +1238,42 @@ fn notify(body: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn facts(sha: &str, signed: bool, publisher: &str, version: &str) -> FileFacts {
+        FileFacts { sha256: sha.into(), signed, publisher: Some(publisher.into()), version: Some(version.into()), ..Default::default() }
+    }
+
+    #[test]
+    fn integrity_first_look_and_same_file_are_quiet() {
+        let a = facts("aa", true, "Acme", "1.0");
+        assert!(integrity_events(None, &a).is_empty());
+        assert!(integrity_events(Some(&a), &a).is_empty());
+    }
+
+    #[test]
+    fn integrity_update_with_new_version_is_quiet() {
+        let a = facts("aa", true, "Acme", "1.0");
+        let b = facts("bb", true, "Acme", "1.1");
+        assert!(integrity_events(Some(&a), &b).is_empty());
+    }
+
+    #[test]
+    fn integrity_reports_what_changed() {
+        let a = facts("aa", true, "Acme", "1.0");
+        let kinds = |b: &FileFacts| integrity_events(Some(&a), b).into_iter().map(|(k, _)| k).collect::<Vec<_>>();
+        assert_eq!(kinds(&facts("bb", true, "Acme", "1.0")), [EventKind::ExeChanged]);
+        assert_eq!(kinds(&facts("bb", false, "Acme", "1.1")), [EventKind::SignatureLost]);
+        assert_eq!(kinds(&facts("bb", false, "Evil Corp", "1.0")), [EventKind::PublisherChanged, EventKind::SignatureLost, EventKind::ExeChanged]);
+        let (_, subject) = &integrity_events(Some(&a), &facts("bb", true, "Evil Corp", "1.1"))[0];
+        assert_eq!(subject, "Acme → Evil Corp");
+    }
+
+    #[test]
+    fn new_adapters_are_the_unknown_ones() {
+        let now = vec![("a".to_string(), "Ethernet".to_string()), ("b".to_string(), "WireGuard Tunnel".to_string())];
+        assert_eq!(new_adapters(&["a".to_string()], &now), vec![("b".to_string(), "WireGuard Tunnel".to_string())]);
+        assert!(new_adapters(&["a".to_string(), "b".to_string()], &now).is_empty());
+    }
 
     #[test]
     fn accumulate_merges() {

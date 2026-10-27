@@ -10,7 +10,7 @@ use crate::monitor::Shared;
 use crate::store::{Event, EventKind};
 
 /// Alert types the filter can narrow to, by their `EventKind::source` name.
-const TYPES: [&str; 12] = [
+const TYPES: [&str; 14] = [
     "First network activity",
     "Internet access monitor",
     "Application info monitor",
@@ -21,6 +21,8 @@ const TYPES: [&str; 12] = [
     "Proxy settings monitor",
     "RDP detection",
     "Hosts file monitor",
+    "Camera and microphone monitor",
+    "Network device monitor",
     "Data usage monitor",
     "Firewall",
 ];
@@ -260,6 +262,12 @@ fn describe(k: EventKind) -> &'static str {
         EventKind::ProxyChanged => "Proxy settings changed:",
         EventKind::Rdp => "Remote Desktop connection from",
         EventKind::HostsChanged => "The hosts file changed:",
+        EventKind::ExeChanged => "changed on disk without a new version",
+        EventKind::PublisherChanged => "publisher changed",
+        EventKind::SignatureLost => "is no longer validly signed",
+        EventKind::CameraUsed => "Camera used by",
+        EventKind::MicUsed => "Microphone used by",
+        EventKind::NewAdapter => "New network adapter:",
     }
 }
 
@@ -286,6 +294,13 @@ fn segments(e: &Event) -> Vec<(String, bool)> {
             vec![(lead, false)]
         }
         EventKind::DataCap => vec![("You reached your data plan limit of ".into(), false), (format!("{}.", e.subject), true)],
+        EventKind::ExeChanged => vec![(" changed on disk without a new version".into(), false), (if e.subject.is_empty() { ".".into() } else { format!(" (still {}).", e.subject) }, false)],
+        EventKind::PublisherChanged => {
+            let (a, b) = e.subject.split_once(" → ").unwrap_or(("?", &e.subject));
+            vec![(" publisher changed from ".into(), false), (a.into(), true), (" to ".into(), false), (format!("{b}."), true)]
+        }
+        EventKind::SignatureLost => vec![(" is no longer validly signed.".into(), false)],
+        EventKind::CameraUsed | EventKind::MicUsed | EventKind::NewAdapter => vec![(format!("{} ", describe(e.kind)), false), (e.subject.clone(), true)],
         EventKind::DeviceLeft | EventKind::DeviceJoined | EventKind::ArpSpoof | EventKind::DnsChanged | EventKind::ProxyChanged | EventKind::Rdp | EventKind::HostsChanged => {
             vec![(format!("{} ", describe(e.kind)), false), (e.subject.clone(), true)]
         }
@@ -317,6 +332,11 @@ fn badge(p: &egui::Painter, center: Pos2, kind: EventKind) {
         EventKind::DnsChanged | EventKind::ProxyChanged => (c::warn(), Some(Glyph::Globe), None),
         EventKind::Rdp => (c::orange(), Some(Glyph::Computer), None),
         EventKind::HostsChanged => (c::warn(), Some(Glyph::Shield), None),
+        EventKind::ExeChanged | EventKind::PublisherChanged => (c::warn(), Some(Glyph::Info), None),
+        EventKind::SignatureLost => (c::bad(), Some(Glyph::Shield), None),
+        EventKind::CameraUsed => (c::orange(), Some(Glyph::Camera), None),
+        EventKind::MicUsed => (c::orange(), Some(Glyph::Bell), None),
+        EventKind::NewAdapter => (c::warn(), Some(Glyph::Plug), None),
     };
     p.circle_filled(center, 20.0, col);
     if let Some(g) = g {

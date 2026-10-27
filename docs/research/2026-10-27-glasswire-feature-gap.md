@@ -1,6 +1,6 @@
 # GlassWire vs Vantage: feature gap report
 
-Sources: ~1,150 UI strings from GlassWire's translation file (inferred features, not verified in the running product) and a read of Vantage's source (`C:\Users\idanr\GlassWire\src`, ~6,200 lines). Vantage claims were confirmed in code, not taken from the README. Paths below are relative to `src/`.
+Sources: ~1,150 UI strings from GlassWire's translation file (inferred features, not verified in the running product) and a read of Vantage's source (`src/`, ~6,200 lines). Vantage claims were confirmed in code, not taken from the README. Paths below are relative to `src/`.
 
 Legend for effort: S = under a day, M = a few days, L = a week or more / architectural.
 Flags: [DRIVER] needs a kernel driver, [CLOUD] needs a cloud service/server, [ACCT] needs an account, [KEY] needs an API key or paid service.
@@ -15,7 +15,9 @@ Re-checked against the code at `classic-graphite`. The tables below are the morn
 
 **Done in the quick-win batch (commit 10cf40d):** G16 save graph as image, G18 graph colour presets, F8/F9 uninstalled apps, F12 NetEye/Defender guard, F13 Windows Firewall off warning, A10 delete one alert, A15 Event Log mirror, A16 alert retention, N6 device type, N7 forget, N8/N9 trusted devices, S14 hosts file monitor, D3 hide app, D6 search online, M6 tray actions, T3 text size, T8 24-hour clock, T9 history retention, U6 clear recent history.
 
-Still missing after that batch:
+**Done in the security-monitor batch:** S7 camera and microphone use, S8/S9/S10 executable, publisher and signature changes, S15 new network adapters, D7 signed status in the app popup.
+
+Still missing after both batches:
 
 | Area | Feature | Effort |
 |---|---|---|
@@ -28,11 +30,7 @@ Still missing after that batch:
 | Things | Network info: DNS servers, saved Wi-Fi (N10) | M |
 | Security | Suspicious host list (S1) | L |
 | Security | Evil twin / open Wi-Fi alerts (S3, S4) | M |
-| Security | Camera and microphone use (S7) | M |
-| Security | Executable changed, publisher changed, signature lost (S8, S9, S10) | M |
-| Security | New network adapter/driver alert (S15) | M |
 | App details | Incognito, Trust app (D4, D5) | M |
-| App details | Signed/unsigned status (D7) | M |
 | Tray | Mini Viewer with always-on-top (M2, M3) | M |
 | Settings | Language selection (T1) | M |
 | Settings | Update check / auto-update (T5, T6, A17) | M |

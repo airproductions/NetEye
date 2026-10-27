@@ -14,9 +14,9 @@ use crate::monitor::{Monitor, Shared, OTHER_KEY, SYSTEM_KEY};
 use crate::store::{AppRecord, Event};
 use crate::system::Dir;
 
-const SIZE: Vec2 = Vec2::new(470.0, 360.0);
+const SIZE: Vec2 = Vec2::new(470.0, 380.0);
 const PAD: f32 = 14.0;
-const BODY_H: f32 = 204.0;
+const BODY_H: f32 = 224.0;
 const MENU_W: f32 = 190.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -70,6 +70,15 @@ pub fn alerts_for<'a>(events: &'a [Event], key: &str) -> Vec<&'a Event> {
     let mut v: Vec<&Event> = events.iter().filter(|e| e.app.as_deref() == Some(key)).collect();
     v.sort_by(|a, b| b.t.cmp(&a.t));
     v
+}
+
+/// The Signature row: from the integrity monitor's last look at the file.
+fn signature_text(rec: Option<&AppRecord>) -> &'static str {
+    match rec.and_then(|r| r.file.as_ref()) {
+        Some(f) if f.signed => "Signed",
+        Some(_) => "Unsigned",
+        None => "Not checked yet",
+    }
 }
 
 /// A web search for an app's file name ("what is foo.exe").
@@ -277,6 +286,7 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
                     rows.push(("Downloaded", r.map(|r| theme::bytes(r.down)).unwrap_or_else(|| "—".into())));
                     rows.push(("Uploaded", r.map(|r| theme::bytes(r.up)).unwrap_or_else(|| "—".into())));
                     rows.push(("Firewall", block_state(r).to_string()));
+                    rows.push(("Signature", signature_text(r).to_string()));
                     bui.spacing_mut().item_spacing.y = 0.0;
                     for (label, value) in rows {
                         let (rr, resp) = bui.allocate_exact_size(Vec2::new(inner_w, 20.0), Sense::hover());
@@ -285,13 +295,14 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
                         let p = bui.painter();
                         p.text(Pos2::new(rr.left(), rr.center().y), Align2::LEFT_CENTER, label, theme::regular(12.5), c::muted());
                         let tr = theme::text(p, Pos2::new(rr.left() + 118.0, rr.center().y), &value, theme::regular(13.0), c::text(), value_w);
-                        if label == "Publisher" && value == "Unknown" {
+                        if (label == "Publisher" && value == "Unknown") || (label == "Signature" && value == "Unsigned") {
                             // no company name in the file: worth a second look
                             let wr = Rect::from_center_size(Pos2::new(tr.right() + 12.0, rr.center().y), Vec2::splat(14.0));
                             let (cx, top, bot) = (wr.center().x, wr.top() + 1.0, wr.bottom() - 1.0);
                             p.add(egui::Shape::convex_polygon(vec![Pos2::new(cx, top), Pos2::new(wr.right(), bot), Pos2::new(wr.left(), bot)], c::warn(), Stroke::NONE));
                             p.text(Pos2::new(cx, wr.center().y + 1.5), Align2::CENTER_CENTER, "!", theme::semibold(10.0), c::panel());
-                            bui.interact(wr, Id::new("app_popup_unknown_pub"), Sense::hover()).on_hover_text("The file doesn't name a publisher");
+                            let tip = if label == "Signature" { "No valid digital signature: Windows can't confirm who made this file" } else { "The file doesn't name a publisher" };
+                            bui.interact(wr, Id::new(("app_popup_warn", label)), Sense::hover()).on_hover_text(tip);
                         }
                         if value.chars().count() > 40 {
                             resp.on_hover_text(value.clone());

@@ -6,6 +6,7 @@ mod hw;
 mod monitor;
 mod net;
 mod ports;
+mod sign;
 mod store;
 mod system;
 mod ui;

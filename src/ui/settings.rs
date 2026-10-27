@@ -178,6 +178,9 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                     changed |= toggle_row(ui, "Proxy settings", "Alert when your proxy or auto-config script changes.", &mut st.monitor_proxy);
                     changed |= toggle_row(ui, "Remote Desktop (RDP)", "Alert when someone connects to this PC with Remote Desktop.", &mut st.monitor_rdp);
                     changed |= toggle_row(ui, "Hosts file", "Alert when the Windows hosts file changes, which can redirect websites.", &mut st.monitor_hosts);
+                    changed |= toggle_row(ui, "App files", "Alert when an app's file changes without an update, its publisher changes, or it loses its signature.", &mut st.monitor_apps);
+                    changed |= toggle_row(ui, "Camera and microphone", "Alert when an app starts using your camera or microphone.", &mut st.monitor_camera);
+                    changed |= toggle_row(ui, "New network adapters", "Alert when a network adapter is added, such as a VPN or virtual network.", &mut st.monitor_adapters);
                 });
                 ui.add_space(20.0);
 

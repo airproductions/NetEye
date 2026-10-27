@@ -347,6 +347,36 @@ pub fn adapters() -> Vec<Adapter> {
     out
 }
 
+/// Every network interface Windows has, as (GUID, description), minus loopback, filter layers and
+/// the built-in tunnel and miniport plumbing every PC has. Used to notice newly added adapters.
+pub fn interfaces() -> Vec<(String, String)> {
+    const PLUMBING: [&str; 7] = ["wan miniport", "kernel debug", "teredo", "6to4", "ip-https", "isatap", "microsoft wi-fi direct virtual"];
+    let mut out = Vec::new();
+    unsafe {
+        let mut table: *mut MIB_IF_TABLE2 = null_mut();
+        if GetIfTable2(&mut table) != 0 || table.is_null() {
+            return out;
+        }
+        let n = (*table).NumEntries as usize;
+        let rows = std::slice::from_raw_parts((*table).Table.as_ptr() as *const MIB_IF_ROW2, n);
+        for r in rows {
+            let filter = r.InterfaceAndOperStatusFlags._bitfield & 2 != 0;
+            let desc = from_wide(&r.Description);
+            let lower = desc.to_lowercase();
+            if filter || r.Type == 24 || desc.is_empty() || PLUMBING.iter().any(|p| lower.contains(p)) {
+                continue;
+            }
+            let g = r.InterfaceGuid;
+            let id = format!("{:08x}-{:04x}-{:04x}-{}", g.data1, g.data2, g.data3, g.data4.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            if !out.iter().any(|(i, _): &(String, String)| *i == id) {
+                out.push((id, desc));
+            }
+        }
+        FreeMibTable(table as *const c_void);
+    }
+    out
+}
+
 /// pid -> executable file name for every running process.
 pub fn process_names() -> HashMap<u32, String> {
     let mut map = HashMap::new();
