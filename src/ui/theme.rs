@@ -661,12 +661,16 @@ pub fn chart_frame(p: &Painter, rect: Rect, title: &str, max_label: &str) {
     let y = rect.top();
     p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0_f32, c::border()));
     let font = regular(13.0);
-    let tr = p.text(Pos2::new(rect.left(), y), Align2::LEFT_CENTER, title, font.clone(), c::muted());
-    p.rect_filled(tr.expand2(Vec2::new(6.0, 2.0)), CornerRadius::ZERO, c::bg());
-    p.text(Pos2::new(rect.left(), y), Align2::LEFT_CENTER, title, font.clone(), c::muted());
-    let mr = p.text(Pos2::new(rect.right(), y), Align2::RIGHT_CENTER, max_label, font.clone(), c::muted());
-    p.rect_filled(mr.expand2(Vec2::new(6.0, 2.0)), CornerRadius::ZERO, c::bg());
-    p.text(Pos2::new(rect.right(), y), Align2::RIGHT_CENTER, max_label, font, c::muted());
+    // Label knockouts: a glass pill behind each label, since there is no solid page background.
+    let pill = |r: Rect| p.rect_filled(r.expand2(Vec2::new(8.0, 2.0)), CornerRadius::same(9), c::glass_top());
+    let tg = p.layout_no_wrap(title.to_string(), font.clone(), c::muted());
+    let tr = Align2::LEFT_CENTER.anchor_size(Pos2::new(rect.left(), y), tg.size());
+    pill(tr);
+    p.galley(tr.min, tg, c::muted());
+    let mg = p.layout_no_wrap(max_label.to_string(), font, c::muted());
+    let mr = Align2::RIGHT_CENTER.anchor_size(Pos2::new(rect.right(), y), mg.size());
+    pill(mr);
+    p.galley(mr.min, mg, c::muted());
 }
 
 /// Rounds a maximum up to a "nice" axis value.
