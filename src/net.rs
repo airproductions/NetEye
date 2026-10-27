@@ -8,7 +8,7 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Graphics::Gdi::{
-    DeleteObject, GetDC, GetDIBits, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     FreeMibTable, GetExtendedTcpTable, GetExtendedUdpTable, GetIfTable2, GetPerTcp6ConnectionEStats,
@@ -437,7 +437,7 @@ pub fn version_info(path: &str) -> VersionInfo {
     }
 }
 
-/// 32x32 RGBA shell icon for a file.
+/// RGBA shell icon for a file, at the size Windows hands out (32 px at 100% scaling, 48 at 150%).
 pub fn file_icon(path: &str) -> Option<(usize, usize, Vec<u8>)> {
     unsafe {
         let wpath = wide(path);
@@ -452,7 +452,21 @@ pub fn file_icon(path: &str) -> Option<(usize, usize, Vec<u8>)> {
             DestroyIcon(hicon);
             return None;
         }
-        let (w, h) = (32usize, 32usize);
+        // the "large" icon follows the display scale, so read its real size; reading a 48 px
+        // bitmap as 32 px wide shears and crops it
+        let mut bm: BITMAP = std::mem::zeroed();
+        let sized = !ii.hbmColor.is_null() && GetObjectW(ii.hbmColor, std::mem::size_of::<BITMAP>() as i32, &mut bm as *mut BITMAP as *mut c_void) != 0;
+        let (w, h) = if sized && (1..=256).contains(&bm.bmWidth) && (1..=256).contains(&bm.bmHeight) { (bm.bmWidth as usize, bm.bmHeight as usize) } else { (0, 0) };
+        if w == 0 {
+            // monochrome icon (no colour bitmap) or an odd size: let the letter tile stand in
+            for b in [ii.hbmColor, ii.hbmMask] {
+                if !b.is_null() {
+                    DeleteObject(b);
+                }
+            }
+            DestroyIcon(hicon);
+            return None;
+        }
         let mut bmi: BITMAPINFO = std::mem::zeroed();
         bmi.bmiHeader = BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,

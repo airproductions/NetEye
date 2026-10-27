@@ -626,16 +626,19 @@ impl TrafficPage {
                     let ir = Rect::from_center_size(Pos2::new(row.left() + 26.0, row.center().y), Vec2::splat(18.0));
                     icons.draw(ui, s, k, ir, name);
                     let p = ui.painter();
-                    theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), c::text(), text_w);
-                    if s.admin {
-                        let cells = connected_cells(*rate, true);
-                        for (ci, (col, _)) in cols.iter().enumerate() {
-                            theme::text_right(p, Pos2::new(col_x(ci), row.center().y), &cells[usize::from(*col) - 1], theme::regular(13.0), c::muted());
-                        }
-                    } else if !cols.is_empty() {
-                        // no speeds without admin: say what we do know, in one muted cell
-                        let tr = theme::text_right(p, Pos2::new(col_x(cols.len() - 1), row.center().y), &conn_label(*n), theme::regular(12.5), c::muted());
-                        p.circle_filled(Pos2::new(tr.left() - 9.0, row.center().y), 3.0, c::good());
+                    // the connection count rides after the name, in the room the name leaves
+                    let count = conn_label(*n);
+                    let count_w = p.layout_no_wrap(count.clone(), theme::regular(12.0), c::muted()).size().x + 14.0;
+                    let name_r = theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), c::text(), (text_w - count_w).max(60.0));
+                    if name_r.right() + count_w <= row.left() + 46.0 + text_w {
+                        p.text(Pos2::new(name_r.right() + 10.0, row.center().y + 1.0), Align2::LEFT_CENTER, count, theme::regular(12.0), c::faint());
+                    }
+                    // speeds now (admin); Windows shares no per-app bytes in limited mode, so "—" there
+                    let cells = connected_cells(*rate, s.admin);
+                    for (ci, (col, _)) in cols.iter().enumerate() {
+                        let speed = usize::from(*col) - 1;
+                        let color = if !s.admin || rate[speed] == 0 { c::faint() } else if speed == 0 { c::down() } else { c::up() };
+                        theme::text_right(p, Pos2::new(col_x(ci), row.center().y), &cells[speed], theme::regular(13.0), color);
                     }
                     app_popup::link(ui, ui.id().with((k, "app-link")), ir, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), text_w, k, actions);
                     resp.on_hover_text(format!("{n} connection{}", if *n == 1 { "" } else { "s" }));
