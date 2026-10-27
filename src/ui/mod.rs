@@ -49,6 +49,8 @@ pub struct VantageApp {
     hardware: hardware::HardwarePage,
     toast: Option<(String, Instant)>,
     page_changed: Instant,
+    theme: Option<egui::Theme>,
+    theme_fade: (palette::Palette, palette::Palette, Instant),
     quit: Arc<AtomicBool>,
     _tray: Option<tray_icon::TrayIcon>,
 }
@@ -76,6 +78,8 @@ impl VantageApp {
             hardware: Default::default(),
             toast: None,
             page_changed: Instant::now() - std::time::Duration::from_secs(1),
+            theme: None,
+            theme_fade: (palette::dark(), palette::dark(), Instant::now()),
             quit,
             _tray: tray,
         }
@@ -115,6 +119,7 @@ impl eframe::App for VantageApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
+        self.update_theme(ctx);
         backdrop::paint_backdrop(&ctx.layer_painter(egui::LayerId::background()), ctx.screen_rect());
         let mut actions = Vec::new();
         {
@@ -186,6 +191,43 @@ impl eframe::App for VantageApp {
 }
 
 impl VantageApp {
+    /// Follows the Appearance setting: switches the palette (cross-fading over `motion::NORMAL`),
+    /// egui's visuals and the native title bar. The first call applies the theme with no fade.
+    fn update_theme(&mut self, ctx: &egui::Context) {
+        let appearance = appearance_override().unwrap_or_else(|| self.monitor.lock().store.data.settings.appearance);
+        let target = crate::store::resolve(appearance, ctx.system_theme());
+        let pal_for = |t: egui::Theme| if t == egui::Theme::Light { palette::light() } else { palette::dark() };
+        if self.theme != Some(target) {
+            let first = self.theme.is_none();
+            let from = if first { pal_for(target) } else { palette::current() };
+            self.theme = Some(target);
+            self.theme_fade = (from, pal_for(target), Instant::now());
+            ctx.set_theme(target);
+            // System keeps following the OS; a forced theme would hide later OS changes from `system_theme`
+            let native = match appearance {
+                crate::store::Appearance::System => egui::SystemTheme::SystemDefault,
+                _ if target == egui::Theme::Light => egui::SystemTheme::Light,
+                _ => egui::SystemTheme::Dark,
+            };
+            ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(native));
+            if first {
+                palette::set(self.theme_fade.1);
+                theme::apply_visuals(ctx, &self.theme_fade.1);
+            }
+        }
+        let (from, to, at) = self.theme_fade;
+        let t = at.elapsed().as_secs_f32() / motion::NORMAL;
+        if t < 1.0 {
+            let p = palette::lerp(&from, &to, motion::ease_out(t));
+            palette::set(p);
+            theme::apply_visuals(ctx, &p);
+            ctx.request_repaint();
+        } else if palette::current() != to {
+            palette::set(to);
+            theme::apply_visuals(ctx, &to);
+        }
+    }
+
     fn rail(&mut self, ctx: &egui::Context, unread: usize) {
         const PAGES: [(Page, Glyph, &str); 5] = [
             (Page::Traffic, Glyph::Traffic, "Traffic"),
@@ -345,6 +387,19 @@ fn status_chip(ui: &mut egui::Ui, g: Glyph, col: Color32, tip: &str) {
     theme::glyph(ui.painter(), r.shrink(6.0), g, col);
     resp.on_hover_text(tip);
     ui.add_space(4.0);
+}
+
+/// Debug builds can force the theme (VANTAGE_APPEARANCE=dark|light) for screenshots.
+fn appearance_override() -> Option<crate::store::Appearance> {
+    use crate::store::Appearance;
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    match std::env::var("VANTAGE_APPEARANCE").unwrap_or_default().as_str() {
+        "dark" => Some(Appearance::Dark),
+        "light" => Some(Appearance::Light),
+        _ => None,
+    }
 }
 
 /// Debug builds can open on a given page (VANTAGE_START_PAGE=firewall|log|scanner|hardware|settings) for screenshots.

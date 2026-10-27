@@ -59,8 +59,8 @@ pub fn dark() -> Palette {
         hover: rgba(120, 170, 255, 8),
         selected: rgba(60, 120, 255, 30),
         border: rgba(140, 180, 255, 16),
-        mesh_line: rgba(61, 139, 255, 30),
-        mesh_node: rgba(127, 196, 255, 80),
+        mesh_line: rgba(61, 139, 255, 14),
+        mesh_node: rgba(127, 196, 255, 50),
         glow: rgba(60, 120, 255, 90),
     }
 }

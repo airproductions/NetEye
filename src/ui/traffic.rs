@@ -385,7 +385,7 @@ impl TrafficPage {
         let nice = theme::nice_max(max);
         for i in 1..=4 {
             let y = chart.bottom() - chart.height() * i as f32 / 4.0;
-            p.line_segment([Pos2::new(chart.left(), y), Pos2::new(chart.right(), y)], Stroke::new(1.0_f32, Color32::from_rgb(0x20, 0x24, 0x2c)));
+            p.line_segment([Pos2::new(chart.left(), y), Pos2::new(chart.right(), y)], Stroke::new(1.0_f32, c::border()));
             p.text(Pos2::new(chart.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::rate(nice * i as f64 / 4.0), theme::regular(11.5), c::faint());
         }
         p.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, c::border()));
@@ -471,7 +471,7 @@ impl TrafficPage {
         let nice = theme::nice_max(max);
         for i in 1..=4 {
             let y = chart.bottom() - chart.height() * i as f32 / 4.0;
-            p.line_segment([Pos2::new(chart.left(), y), Pos2::new(chart.right(), y)], Stroke::new(1.0_f32, Color32::from_rgb(0x20, 0x24, 0x2c)));
+            p.line_segment([Pos2::new(chart.left(), y), Pos2::new(chart.right(), y)], Stroke::new(1.0_f32, c::border()));
             p.text(Pos2::new(chart.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::bytes((nice * i as f64 / 4.0) as u64), theme::regular(11.5), c::faint());
         }
         let slot = chart.width() / groups.len() as f32;

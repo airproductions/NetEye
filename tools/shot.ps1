@@ -2,6 +2,7 @@ param(
   [Parameter(Mandatory)][string]$Out,
   [string]$Exe = "$PSScriptRoot\..\target\debug\vantage.exe",
   [string]$Page = "",
+  [string]$Appearance = "",
   [int]$Wait = 6
 )
 # Dev helper: launches a debug build, captures its window with PrintWindow, saves a PNG, closes it.
@@ -23,6 +24,7 @@ try {
   Get-Process vantage -ErrorAction SilentlyContinue | Stop-Process -Force
   Start-Sleep -Milliseconds 500
   $env:VANTAGE_START_PAGE = $Page
+  $env:VANTAGE_APPEARANCE = $Appearance
   $p = Start-Process (Resolve-Path $Exe) -PassThru
   Start-Sleep -Seconds $Wait
   $p.Refresh()

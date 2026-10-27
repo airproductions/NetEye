@@ -16,6 +16,24 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Appearance {
+    #[default]
+    System,
+    Dark,
+    Light,
+}
+
+/// Theme to show for a setting; `System` follows the OS and falls back to dark when it is unknown.
+pub fn resolve(a: Appearance, system: Option<eframe::egui::Theme>) -> eframe::egui::Theme {
+    use eframe::egui::Theme;
+    match a {
+        Appearance::Dark => Theme::Dark,
+        Appearance::Light => Theme::Light,
+        Appearance::System => system.unwrap_or(Theme::Dark),
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
@@ -29,6 +47,7 @@ pub struct Settings {
     pub close_on_block: bool,
     pub firewall_enabled: bool,
     pub auto_scan: bool,
+    pub appearance: Appearance,
 }
 
 impl Default for Settings {
@@ -44,6 +63,7 @@ impl Default for Settings {
             close_on_block: false,
             firewall_enabled: true,
             auto_scan: true,
+            appearance: Appearance::System,
         }
     }
 }
@@ -253,5 +273,31 @@ impl Store {
             a.up = 0;
         }
         self.dirty = true;
+    }
+}
+
+#[cfg(test)]
+mod appearance_tests {
+    use super::*;
+    use eframe::egui::Theme;
+
+    #[test]
+    fn old_settings_json_loads() {
+        let s: Settings = serde_json::from_str(r#"{"notifications":false,"daily_cap_mb":500}"#).unwrap();
+        assert_eq!(s.appearance, Appearance::System);
+        assert!(!s.notifications);
+        assert_eq!(s.daily_cap_mb, 500);
+        assert!(s.close_to_tray);
+    }
+
+    #[test]
+    fn resolve_cases() {
+        for sys in [Some(Theme::Light), Some(Theme::Dark), None] {
+            assert_eq!(resolve(Appearance::Dark, sys), Theme::Dark);
+            assert_eq!(resolve(Appearance::Light, sys), Theme::Light);
+        }
+        assert_eq!(resolve(Appearance::System, Some(Theme::Light)), Theme::Light);
+        assert_eq!(resolve(Appearance::System, Some(Theme::Dark)), Theme::Dark);
+        assert_eq!(resolve(Appearance::System, None), Theme::Dark);
     }
 }

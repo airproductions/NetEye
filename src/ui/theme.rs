@@ -67,15 +67,16 @@ fn font_definitions() -> FontDefinitions {
 pub fn setup(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
 
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = Vec2::new(8.0, 6.0);
-    style.spacing.button_padding = Vec2::new(12.0, 6.0);
-    style.spacing.interact_size.y = 30.0;
-    style.text_styles.insert(egui::TextStyle::Body, regular(14.0));
-    style.text_styles.insert(egui::TextStyle::Button, regular(14.0));
-    style.text_styles.insert(egui::TextStyle::Small, regular(12.0));
-    style.text_styles.insert(egui::TextStyle::Heading, semibold(20.0));
-    ctx.set_style(style);
+    // both egui styles (dark and light) get the same metrics, so switching theme keeps the layout
+    ctx.all_styles_mut(|style| {
+        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+        style.spacing.button_padding = Vec2::new(12.0, 6.0);
+        style.spacing.interact_size.y = 30.0;
+        style.text_styles.insert(egui::TextStyle::Body, regular(14.0));
+        style.text_styles.insert(egui::TextStyle::Button, regular(14.0));
+        style.text_styles.insert(egui::TextStyle::Small, regular(12.0));
+        style.text_styles.insert(egui::TextStyle::Heading, semibold(20.0));
+    });
     apply_visuals(ctx, &super::palette::current());
 }
 

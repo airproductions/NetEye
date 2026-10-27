@@ -214,7 +214,7 @@ impl HardwarePage {
             ("Disk transfer rate", &disk, disk_max, theme::rate(disk_max)),
             ("GPU", &gpu, pct_max(&gpu), format!("{:.0}%", pct_max(&gpu))),
         ];
-        let line_col = egui::Color32::from_rgb(0x5b, 0x8d, 0xff);
+        let line_col = c::accent();
         for (i, (label, vals, max, max_label)) in rows.iter().enumerate() {
             let cr = Rect::from_min_max(Pos2::new(r.left(), top + each * i as f32 + 12.0), Pos2::new(r.right(), top + each * (i + 1) as f32 - 10.0));
             theme::chart_frame(&p, cr, label, max_label);

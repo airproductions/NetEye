@@ -5,6 +5,7 @@ use eframe::egui::{self, Vec2};
 use super::theme::{self, c};
 use super::Action;
 use crate::monitor::Shared;
+use crate::store::Appearance;
 
 fn toggle_row(ui: &mut egui::Ui, title: &str, detail: &str, value: &mut bool) -> bool {
     let mut changed = false;
@@ -35,6 +36,32 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                 ui.set_width(width);
                 let mut changed = false;
                 let st = &mut s.store.data.settings;
+
+                theme::label(ui, "APPEARANCE", theme::semibold(12.0), c::muted());
+                ui.add_space(6.0);
+                theme::card(ui, |ui| {
+                    ui.set_width(width - 32.0);
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            theme::label(ui, "Theme", theme::semibold(14.5), c::text());
+                            theme::label(ui, "System follows your Windows light or dark setting.", theme::regular(13.0), c::muted());
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let mut sel = match st.appearance {
+                                Appearance::System => 0,
+                                Appearance::Dark => 1,
+                                Appearance::Light => 2,
+                            };
+                            let before = sel;
+                            theme::segmented_text(ui, &["System", "Dark", "Light"], &mut sel, None);
+                            if sel != before {
+                                st.appearance = [Appearance::System, Appearance::Dark, Appearance::Light][sel];
+                                changed = true;
+                            }
+                        });
+                    });
+                });
+                ui.add_space(20.0);
 
                 theme::label(ui, "NOTIFICATIONS", theme::semibold(12.0), c::muted());
                 ui.add_space(6.0);
