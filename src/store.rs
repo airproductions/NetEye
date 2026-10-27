@@ -108,7 +108,6 @@ pub struct Settings {
     pub sorts: BTreeMap<String, SortSpec>,
 }
 
-#[allow(dead_code)] // Tasks 4-6 consume these.
 impl Settings {
     pub fn sort_for(&self, list: &str, default: SortSpec) -> SortSpec {
         self.sorts.get(list).copied().unwrap_or(default)

@@ -272,9 +272,9 @@ impl TrafficPage {
         let mut spec = normalize(s.store.data.settings.sort_for("traffic", NATURAL));
         let hh = |x0: f32, x1: f32| Rect::from_min_max(Pos2::new(x0, hr.top()), Pos2::new(x1, hr.bottom()));
         let mut changed = false;
-        changed |= sort::header(ui, hh(r.left() + 46.0, cd - 100.0), "App", 0, &mut spec, false, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, hh(cd - 70.0, cd), "↓", 1, &mut spec, true, Align2::RIGHT_CENTER);
-        changed |= sort::header(ui, hh(cu - 70.0, cu), "↑", 2, &mut spec, true, Align2::RIGHT_CENTER);
+        changed |= sort::header(ui, hh(r.left() + 46.0, cd - 100.0), "App", 0, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, hh(cd - 70.0, cd), "↓", 1, &mut spec, true, NATURAL, Align2::RIGHT_CENTER);
+        changed |= sort::header(ui, hh(cu - 70.0, cu), "↑", 2, &mut spec, true, NATURAL, Align2::RIGHT_CENTER);
         if changed {
             s.store.data.settings.set_sort("traffic", spec);
             s.store.mark_dirty();

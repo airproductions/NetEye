@@ -423,7 +423,6 @@ pub fn primary_button(ui: &mut Ui, text_s: &str) -> Response {
     let galley = ui.painter().layout_no_wrap(text_s.to_string(), font, Color32::WHITE);
     let (r, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 28.0, 32.0), Sense::click());
     let t = motion::hover(ui, resp.id, resp.hovered());
-    glow(ui.painter(), r, 10, t);
     ui.painter().rect_filled(r, CornerRadius::same(10), lerp_color(c::accent(), c::accent2(), t * 0.35));
     ui.painter().galley(r.center() - galley.size() / 2.0, galley, Color32::WHITE);
     resp
@@ -434,7 +433,6 @@ pub fn switch(ui: &mut Ui, on: bool) -> Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::new(40.0, 22.0), Sense::click());
     let t = ui.ctx().animate_bool_with_time(resp.id, on, motion::FAST);
     let bg = lerp_color(c::raised(), c::accent(), t);
-    glow(ui.painter(), r, 11, t * 0.6);
     ui.painter().rect_filled(r, CornerRadius::same(11), bg);
     ui.painter().rect_stroke(r, CornerRadius::same(11), Stroke::new(1.0_f32, lerp_color(c::border(), Color32::TRANSPARENT, t)), StrokeKind::Inside);
     let x = egui::lerp(r.left() + 11.0..=r.right() - 11.0, t);
@@ -472,7 +470,6 @@ fn segment_track(ui: &mut Ui, widths: &[f32], height: f32, selected: &mut usize,
     let a = rects[i0.min(rects.len() - 1)];
     let b = rects[(i0 + 1).min(rects.len() - 1)];
     let pill = Rect::from_min_max(a.min.lerp(b.min, frac), a.max.lerp(b.max, frac));
-    glow(&p, pill, 9, 0.7);
     p.rect_filled(pill, CornerRadius::same(9), c::accent());
     for (i, sr) in rects.iter().enumerate() {
         let active = *selected == i;
@@ -567,19 +564,17 @@ pub fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Flat surfaces (the names are kept from the glass look so pages keep compiling)
+// Flat surfaces
 
-/// Frame-based flat card for layouts that need a `Frame`.
-pub fn glass_frame() -> egui::Frame {
+/// Frame-based flat card for layouts that need a `Frame`, with a soft drop shadow.
+pub fn card_frame() -> egui::Frame {
     egui::Frame::default()
         .fill(c::panel())
         .stroke(Stroke::new(1.0_f32, c::border()))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(egui::Margin::same(14))
+        .shadow(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: c::shadow() })
 }
-
-/// No-op: the flat look has no glow. Kept so existing callers compile.
-pub fn glow(_p: &Painter, _r: Rect, _radius: u8, _t: f32) {}
 
 // ---------------------------------------------------------------------------------------------
 // Charts
@@ -825,7 +820,7 @@ mod tests {
 
     #[test]
     fn gamma_multiply_scales_translucent_alpha() {
-        // the replacement used for glow(), the rail strip and the mesh halo: egui blends premultiplied
+        // the replacement used for the rail strip and the mesh halo: egui blends premultiplied
         // channels, so a weaker copy of a colour keeps each channel's ratio to alpha
         let c = Color32::from_rgba_unmultiplied(60, 120, 255, 90);
         let ratios = |x: Color32| [x.r(), x.g(), x.b()].map(|v| v as f32 / x.a() as f32);

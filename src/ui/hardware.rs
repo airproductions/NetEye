@@ -88,7 +88,7 @@ impl HardwarePage {
             } else {
                 (Rect::from_min_size(Pos2::new(x, hr.top()), Vec2::new(w, hr.height())), Align2::LEFT_CENTER)
             };
-            sort_changed |= sort::header(ui, hit, label, col, &mut spec, right, align);
+            sort_changed |= sort::header(ui, hit, label, col, &mut spec, right, DEFAULT_SORT, align);
         }
         if sort_changed {
             s.store.data.settings.set_sort("hardware", spec);

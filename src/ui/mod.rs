@@ -10,6 +10,7 @@ mod sort;
 pub mod theme;
 mod traffic;
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -59,6 +60,8 @@ pub struct VantageApp {
     hardware: hardware::HardwarePage,
     toast: Option<(String, Instant)>,
     app_popup: Option<app_popup::AppPopup>,
+    /// Block changes waiting their turn: concurrent `apply_firewall` calls clobber each other in limited mode.
+    pending_blocks: VecDeque<(String, Dir, bool)>,
     page_changed: Instant,
     theme: Option<egui::Theme>,
     theme_fade: (palette::Palette, palette::Palette, Instant),
@@ -96,6 +99,7 @@ impl VantageApp {
             hardware: Default::default(),
             toast: None,
             app_popup: None,
+            pending_blocks: VecDeque::new(),
             page_changed: Instant::now() - std::time::Duration::from_secs(1),
             theme: None,
             theme_fade: (palette::dark(), palette::dark(), Instant::now()),
@@ -105,10 +109,24 @@ impl VantageApp {
         }
     }
 
+    /// Starts at most one queued block change per frame, and only while the firewall is idle.
+    fn drain_blocks(&mut self, ctx: &egui::Context) {
+        if self.pending_blocks.is_empty() {
+            return;
+        }
+        let busy = self.monitor.lock().firewall_busy;
+        if let Some((key, dir, block)) = next_block(&mut self.pending_blocks, busy) {
+            self.monitor.set_block(&key, dir, block);
+        }
+        if !self.pending_blocks.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
+
     fn run_actions(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
         for a in actions {
             match a {
-                Action::Block(key, dir, block) => self.monitor.set_block(&key, dir, block),
+                Action::Block(key, dir, block) => self.pending_blocks.push_back((key, dir, block)),
                 Action::FirewallEnabled(on) => self.monitor.set_firewall_enabled(on),
                 Action::FirewallMode(m) => self.monitor.set_firewall_mode(m),
                 Action::ApplyProfile(name) => self.monitor.apply_profile(&name),
@@ -178,7 +196,7 @@ impl eframe::App for VantageApp {
             if !s.admin {
                 egui::TopBottomPanel::top("admin")
                     .exact_height(40.0)
-                    .frame(egui::Frame::default().fill(Color32::from_rgb(0x2a, 0x24, 0x14)).inner_margin(egui::Margin::symmetric(18, 0)))
+                    .frame(egui::Frame::default().fill(theme::lerp_color(c::panel(), c::warn(), 0.12)).inner_margin(egui::Margin::symmetric(18, 0)))
                     .show(ctx, |ui| {
                         ui.horizontal_centered(|ui| {
                             theme::glyph(ui.painter(), Rect::from_center_size(ui.cursor().min + Vec2::new(9.0, 20.0), Vec2::splat(18.0)), Glyph::Lock, c::warn());
@@ -187,7 +205,7 @@ impl eframe::App for VantageApp {
                                 ui,
                                 "Limited mode: per-app traffic and silent firewall changes need administrator rights.",
                                 theme::regular(13.5),
-                                Color32::from_rgb(0xf3, 0xd9, 0x9b),
+                                c::text(),
                             );
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if theme::primary_button(ui, "Restart as administrator").clicked() {
@@ -203,7 +221,7 @@ impl eframe::App for VantageApp {
                 let more = s.asks.len() - 1;
                 egui::TopBottomPanel::top("ask")
                     .exact_height(46.0)
-                    .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(18, 0)))
+                    .frame(egui::Frame::default().fill(c::panel()).inner_margin(egui::Margin::symmetric(18, 0)))
                     .show(ctx, |ui| {
                         let bar = ui.max_rect().expand2(Vec2::new(18.0, 0.0));
                         let a = c::accent();
@@ -250,6 +268,7 @@ impl eframe::App for VantageApp {
         }
         self.draw_toast(ctx);
         self.run_actions(ctx, actions);
+        self.drain_blocks(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -395,11 +414,9 @@ impl VantageApp {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 ui.set_opacity(alpha);
-                egui::Frame::default().fill(c::bg()).corner_radius(CornerRadius::same(14)).show(ui, |ui| {
-                    theme::glass_frame().inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
-                        ui.set_max_width(420.0);
-                        theme::label(ui, msg.clone(), theme::regular(14.0), c::text());
-                    });
+                theme::card_frame().inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
+                    ui.set_max_width(420.0);
+                    theme::label(ui, msg.clone(), theme::regular(14.0), c::text());
                 });
             });
         // every frame only while it slides in or fades out; one wake-up at the fade while it holds
@@ -622,5 +639,42 @@ mod tests {
     fn page_titles() {
         assert_eq!(page_title(Page::Log), "Activity");
         assert_eq!(page_title(Page::Settings), "Settings");
+    }
+}
+
+/// The next queued block change to start, if the firewall is idle. `Monitor::set_block` sets
+/// `firewall_busy` before it returns, so one item per idle frame never overlaps another.
+fn next_block(queue: &mut VecDeque<(String, Dir, bool)>, busy: bool) -> Option<(String, Dir, bool)> {
+    if busy { None } else { queue.pop_front() }
+}
+
+#[cfg(test)]
+mod block_queue_tests {
+    use super::*;
+
+    fn q(items: &[&str]) -> VecDeque<(String, Dir, bool)> {
+        items.iter().map(|k| (k.to_string(), Dir::Out, true)).collect()
+    }
+
+    #[test]
+    fn busy_leaves_queue_alone() {
+        let mut queue = q(&["a", "b"]);
+        assert_eq!(next_block(&mut queue, true), None);
+        assert_eq!(queue, q(&["a", "b"]));
+    }
+
+    #[test]
+    fn idle_pops_fifo() {
+        let mut queue = q(&["a", "b"]);
+        assert_eq!(next_block(&mut queue, false).map(|b| b.0), Some("a".to_string()));
+        assert_eq!(next_block(&mut queue, false).map(|b| b.0), Some("b".to_string()));
+        assert_eq!(next_block(&mut queue, false), None);
+    }
+
+    #[test]
+    fn empty_is_none() {
+        let mut queue = VecDeque::new();
+        assert_eq!(next_block(&mut queue, false), None);
+        assert_eq!(next_block(&mut queue, true), None);
     }
 }

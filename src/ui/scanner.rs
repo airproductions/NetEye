@@ -120,7 +120,7 @@ impl ScannerPage {
             let rect = Rect::from_min_max(Pos2::new(cols[i], hr.top()), Pos2::new(right.max(cols[i] + 16.0), hr.bottom()));
             // The status column has no label; a dot stands in for it.
             let label = if i == 0 { "●" } else { h };
-            sort_changed |= sort::header(ui, rect, label, i as u8, &mut spec, false, Align2::LEFT_CENTER);
+            sort_changed |= sort::header(ui, rect, label, i as u8, &mut spec, false, DEFAULT_SORT, Align2::LEFT_CENTER);
         }
         if sort_changed {
             s.store.data.settings.set_sort("scanner", spec);

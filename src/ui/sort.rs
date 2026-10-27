@@ -1,5 +1,4 @@
 //! Column sorting shared by the Traffic, Firewall, Scanner and Hardware lists.
-#![allow(dead_code)] // Tasks 4-6 consume this module.
 
 use std::cmp::Ordering;
 
@@ -11,10 +10,15 @@ use super::theme::{self, c};
 pub use crate::store::SortSpec;
 
 impl SortSpec {
-    /// Clicking the active column flips the direction; another column becomes active with `default_desc`.
-    pub fn click(&mut self, col: u8, default_desc: bool) {
+    /// Another column becomes active with `default_desc`; clicking the active column flips it away from
+    /// its default, and a third click restores the list's `natural` order.
+    pub fn click(&mut self, col: u8, default_desc: bool, natural: SortSpec) {
         if self.col == col {
-            self.desc = !self.desc;
+            if self.desc == default_desc {
+                self.desc = !self.desc;
+            } else {
+                *self = natural;
+            }
         } else {
             *self = SortSpec { col, desc: default_desc };
         }
@@ -61,8 +65,10 @@ pub fn apply<T>(rows: &mut [T], spec: SortSpec, key: impl Fn(&T, &T, u8) -> Orde
     });
 }
 
-/// Clickable column header. Muted when idle, bright with a direction arrow when active. Returns true when clicked.
-pub fn header(ui: &mut Ui, rect: Rect, label: &str, col: u8, spec: &mut SortSpec, default_desc: bool, align: Align2) -> bool {
+/// Clickable column header. Muted when idle, bright with a direction arrow when active. Updates `spec`
+/// (cycling back to `natural` on the third click) and returns true when clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn header(ui: &mut Ui, rect: Rect, label: &str, col: u8, spec: &mut SortSpec, default_desc: bool, natural: SortSpec, align: Align2) -> bool {
     let id = ui.id().with(("sort", label, col));
     let resp = ui.interact(rect, id, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     let active = spec.col == col;
@@ -78,7 +84,7 @@ pub fn header(ui: &mut Ui, rect: Rect, label: &str, col: u8, spec: &mut SortSpec
     ui.painter().text(pos, align, text, theme::semibold(12.0), color);
     let clicked = resp.clicked();
     if clicked {
-        spec.click(col, default_desc);
+        spec.click(col, default_desc, natural);
     }
     clicked
 }
@@ -108,13 +114,55 @@ mod tests {
         assert_eq!(cmp_opt(Some(1), None::<i32>, true), Greater);
     }
 
+    const SENTINEL: SortSpec = SortSpec { col: u8::MAX, desc: true };
+
     #[test]
     fn click_flips_then_switches() {
         let mut s = SortSpec { col: 0, desc: false };
-        s.click(0, true);
+        s.click(0, false, SENTINEL);
         assert!(s.desc);
-        s.click(2, true);
+        s.click(2, true, SENTINEL);
         assert_eq!(s, SortSpec { col: 2, desc: true });
+    }
+
+    #[test]
+    fn desc_default_cycles_desc_asc_natural() {
+        let mut s = SENTINEL;
+        s.click(1, true, SENTINEL);
+        assert_eq!(s, SortSpec { col: 1, desc: true });
+        s.click(1, true, SENTINEL);
+        assert_eq!(s, SortSpec { col: 1, desc: false });
+        s.click(1, true, SENTINEL);
+        assert_eq!(s, SENTINEL);
+    }
+
+    #[test]
+    fn asc_default_cycles_asc_desc_natural() {
+        let natural = SortSpec { col: u8::MAX, desc: false };
+        let mut s = natural;
+        s.click(3, false, natural);
+        assert_eq!(s, SortSpec { col: 3, desc: false });
+        s.click(3, false, natural);
+        assert_eq!(s, SortSpec { col: 3, desc: true });
+        s.click(3, false, natural);
+        assert_eq!(s, natural);
+    }
+
+    #[test]
+    fn natural_on_a_normal_column() {
+        // Scanner-style: the natural order is column 0 ascending.
+        let natural = SortSpec { col: 0, desc: false };
+        let mut s = natural;
+        s.click(2, true, natural);
+        s.click(2, true, natural);
+        assert_eq!(s, SortSpec { col: 2, desc: false });
+        s.click(2, true, natural);
+        assert_eq!(s, natural);
+        // the natural column itself: asc -> desc -> back to natural
+        s.click(0, false, natural);
+        assert_eq!(s, SortSpec { col: 0, desc: true });
+        s.click(0, false, natural);
+        assert_eq!(s, natural);
     }
 
     #[test]

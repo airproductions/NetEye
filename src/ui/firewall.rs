@@ -120,17 +120,17 @@ impl FirewallPage {
         let (top, bot) = (hr.top(), hr.bottom());
         let span = |x0: f32, x1: f32| Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, bot));
         let mut changed = false;
-        changed |= sort::header(ui, span(cols.app + 30.0, cols.inc - 8.0), "Apps", 0, &mut spec, false, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, span(cols.inc + 8.0, cols.out - 4.0), "Incoming", 1, &mut spec, false, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, span(cols.out + 8.0, cols.publisher - 4.0), "Outgoing", 2, &mut spec, false, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, span(cols.publisher, cols.version - 4.0), "Publisher", 3, &mut spec, false, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, span(cols.version, cols.hosts - 4.0), "Version", 4, &mut spec, false, Align2::LEFT_CENTER);
-        changed |= sort::header(ui, span(cols.hosts, cols.down - 76.0), "Hosts", 5, &mut spec, true, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.app + 30.0, cols.inc - 8.0), "Apps", 0, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.inc + 8.0, cols.out - 4.0), "Incoming", 1, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.out + 8.0, cols.publisher - 4.0), "Outgoing", 2, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.publisher, cols.version - 4.0), "Publisher", 3, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.version, cols.hosts - 4.0), "Version", 4, &mut spec, false, NATURAL, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.hosts, cols.down - 76.0), "Hosts", 5, &mut spec, true, NATURAL, Align2::LEFT_CENTER);
         theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(cols.down - 30.0, hr.center().y), Vec2::splat(13.0)), Glyph::Down, c::down());
         theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(cols.up - 30.0, hr.center().y), Vec2::splat(13.0)), Glyph::Up, c::up());
-        changed |= sort::header(ui, span(cols.down - 44.0, cols.down), "", 6, &mut spec, true, Align2::RIGHT_CENTER);
-        changed |= sort::header(ui, span(cols.up - 44.0, cols.up), "", 7, &mut spec, true, Align2::RIGHT_CENTER);
-        changed |= sort::header(ui, span(cols.spark, cols.end), "Traffic", 8, &mut spec, true, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, span(cols.down - 44.0, cols.down), "", 6, &mut spec, true, NATURAL, Align2::RIGHT_CENTER);
+        changed |= sort::header(ui, span(cols.up - 44.0, cols.up), "", 7, &mut spec, true, NATURAL, Align2::RIGHT_CENTER);
+        changed |= sort::header(ui, span(cols.spark, cols.end), "Traffic", 8, &mut spec, true, NATURAL, Align2::LEFT_CENTER);
         ui.painter().line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::border()));
         if changed {
             s.store.data.settings.set_sort("firewall", spec);
