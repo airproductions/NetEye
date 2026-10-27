@@ -241,7 +241,7 @@ impl HardwarePage {
             let x = r.left() + r.width() * i as f32 / 5.0;
             let t = now - (n as i64) + (n as i64) * i / 5;
             let align = if i == 0 { Align2::LEFT_TOP } else if i == 5 { Align2::RIGHT_TOP } else { Align2::CENTER_TOP };
-            p.text(Pos2::new(x, ay), align, theme::local(t).format("%-I:%M:%S %p").to_string(), theme::regular(12.0), c::muted());
+            p.text(Pos2::new(x, ay), align, theme::fmt_time(t, true), theme::regular(12.0), c::muted());
         }
         // stats row
         let sr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - stats_h), r.max);

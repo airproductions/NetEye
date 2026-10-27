@@ -255,7 +255,7 @@ fn period_label(span: Span) -> String {
 /// Time axis label for a sample at `t` in a window of `len` seconds.
 fn tick_label(step: i64, len: i64, t: i64) -> String {
     if step < MINUTE && t % MINUTE != 0 {
-        theme::local(t).format("%-I:%M:%S").to_string()
+        theme::local(t).format(if theme::clock_24h() { "%H:%M:%S" } else { "%-I:%M:%S" }).to_string()
     } else if step < HOUR {
         theme::clock(t)
     } else if len <= 8 * DAY {
@@ -268,11 +268,11 @@ fn tick_label(step: i64, len: i64, t: i64) -> String {
 /// Graph tooltip heading for the step at `t`.
 fn tip_when(step: i64, t: i64) -> String {
     if step < MINUTE {
-        theme::local(t).format("%-I:%M:%S %p").to_string()
+        theme::fmt_time(t, true)
     } else if step < HOUR {
         theme::clock(t)
     } else {
-        theme::local(t).format("%a %-d %b, %-I %p").to_string()
+        theme::local(t).format(if theme::clock_24h() { "%a %-d %b, %H:00" } else { "%a %-d %b, %-I %p" }).to_string()
     }
 }
 
@@ -400,6 +400,8 @@ fn chip(ui: &mut egui::Ui, text: &str, color: Color32, tip: &str) -> egui::Respo
 pub struct TrafficPage {
     /// The chart's title row; the graph draws its scale menu and pause button at its right end.
     title_row: Rect,
+    /// The camera button was pressed; chart_area turns it into a SaveGraph action.
+    want_shot: bool,
     span: Span,
     mode: usize,
     sel: Sel,
@@ -429,6 +431,7 @@ impl Default for TrafficPage {
     fn default() -> Self {
         Self {
             title_row: Rect::NOTHING,
+            want_shot: false,
             span: Span::Preset(0),
             mode: 0,
             sel: Sel::All,
@@ -588,6 +591,7 @@ impl TrafficPage {
             .rows
             .iter()
             .filter(|r| s.admin || r.key != OTHER_KEY)
+            .filter(|r| group != Group::Apps || !s.store.data.apps.get(&r.key).is_some_and(|a| a.hidden))
             .map(|r| (r.key.clone(), if group == Group::Apps { s.app_name(&r.key) } else { r.label.clone() }, [r.down, r.up]))
             .filter(|(_, n, _)| q.is_empty() || n.to_lowercase().contains(&q))
             .collect();
@@ -600,7 +604,8 @@ impl TrafficPage {
             for (k, l) in &s.apps_live {
                 let n = l.in_conns + l.out_conns;
                 let name = s.app_name(k);
-                if n > 0 && k != OTHER_KEY && (q.is_empty() || name.to_lowercase().contains(&q)) {
+                let hidden = s.store.data.apps.get(k).is_some_and(|a| a.hidden);
+                if n > 0 && k != OTHER_KEY && !hidden && (q.is_empty() || name.to_lowercase().contains(&q)) {
                     connected.push((k.clone(), name, n, l.rate));
                 }
             }
@@ -798,6 +803,10 @@ impl TrafficPage {
             _ => {
                 let view = self.paused.clone().unwrap_or_else(|| agg.clone());
                 self.graph(ui, s, chart, &view, group, dir);
+                if std::mem::take(&mut self.want_shot) {
+                    // the title row down to the time labels
+                    actions.push(Action::SaveGraph(Rect::from_min_max(title.min, Pos2::new(r.right(), chart.bottom() + 26.0))));
+                }
             }
         }
         if scrub {
@@ -950,6 +959,9 @@ impl TrafficPage {
             if chip(&mut right, "Paused", c::warn(), "The graph is frozen; click to resume").clicked() {
                 self.paused = None;
             }
+        }
+        if theme::icon_button(&mut right, Glyph::Camera, 28.0, "Save graph as image").clicked() {
+            self.want_shot = true;
         }
         right.add_space(6.0);
         let mut left = right;

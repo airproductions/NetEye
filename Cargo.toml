@@ -39,6 +39,7 @@ features = [
   "Win32_System_Rpc",
   "Win32_Security",
   "Win32_System_Registry",
+  "Win32_System_EventLog",
 ]
 
 [profile.release]

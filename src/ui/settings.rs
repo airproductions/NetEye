@@ -97,6 +97,30 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                             changed = true;
                         }
                     });
+                    row(ui, "Text size", "Scales all text and controls.", |ui| {
+                        let mut sel = usize::from(st.text_scale.min(3));
+                        theme::segmented_text(ui, &["Small", "Normal", "Large", "Larger"], &mut sel, None);
+                        if sel != usize::from(st.text_scale) {
+                            st.text_scale = sel as u8;
+                            changed = true;
+                        }
+                    });
+                    row(ui, "Clock", "How times are written across the app.", |ui| {
+                        let mut sel = usize::from(st.clock_24h);
+                        theme::segmented_text(ui, &["12-hour", "24-hour"], &mut sel, None);
+                        if (sel == 1) != st.clock_24h {
+                            st.clock_24h = sel == 1;
+                            changed = true;
+                        }
+                    });
+                    row(ui, "Graph colours", "Download and upload colours. Colour-blind safe uses blue and orange.", |ui| {
+                        let mut sel = usize::from(st.graph_colors.min(2));
+                        theme::segmented_text(ui, &["Teal & orchid", "Colour-blind safe", "Cyan & pink"], &mut sel, None);
+                        if sel != usize::from(st.graph_colors) {
+                            st.graph_colors = sel as u8;
+                            changed = true;
+                        }
+                    });
                 });
                 ui.add_space(20.0);
 
@@ -131,6 +155,17 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                             }
                         }
                     });
+                    row(ui, "Keep alerts", "The activity log keeps this many alerts; older ones are dropped.", |ui| {
+                        let limits = [500u32, 2_000, 10_000];
+                        let mut sel = limits.iter().position(|l| *l == st.event_limit).unwrap_or(1);
+                        let before = sel;
+                        theme::segmented_text(ui, &["500", "2,000", "10,000"], &mut sel, None);
+                        if sel != before || !limits.contains(&st.event_limit) {
+                            st.event_limit = limits[sel];
+                            changed = true;
+                        }
+                    });
+                    changed |= toggle_row(ui, "Windows Event Log", "Also write alerts to the Application log (source \"NetEye\"), for Event Viewer or other tools.", &mut st.event_log);
                 });
                 ui.add_space(20.0);
 
@@ -142,6 +177,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                     changed |= toggle_row(ui, "DNS server settings", "Alert when the DNS servers Windows uses change.", &mut st.monitor_dns);
                     changed |= toggle_row(ui, "Proxy settings", "Alert when your proxy or auto-config script changes.", &mut st.monitor_proxy);
                     changed |= toggle_row(ui, "Remote Desktop (RDP)", "Alert when someone connects to this PC with Remote Desktop.", &mut st.monitor_rdp);
+                    changed |= toggle_row(ui, "Hosts file", "Alert when the Windows hosts file changes, which can redirect websites.", &mut st.monitor_hosts);
                 });
                 ui.add_space(20.0);
 
@@ -159,6 +195,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                             changed = true;
                         }
                     });
+                    changed |= toggle_row(ui, "Alert on unknown devices only", "Devices you mark Trusted in the scanner don't raise join or leave alerts.", &mut st.alert_untrusted_only);
                 });
                 ui.add_space(20.0);
 
@@ -207,6 +244,31 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                         theme::label(ui, format!("Used {} of {} ({:.0}%)", theme::bytes(used), theme::bytes(cap), used as f64 / cap as f64 * 100.0), theme::regular(13.0), c::muted());
                         ui.add_space(12.0);
                     }
+                    let st = &mut s.store.data.settings;
+                    row(ui, "Keep hourly history", "Older hours are dropped. Shorter keeps less about you on disk.", |ui| {
+                        let days = [7u16, 14, 32];
+                        let mut sel = days.iter().position(|d| *d == st.history_days).unwrap_or(2);
+                        let before = sel;
+                        theme::segmented_text(ui, &["7 days", "14 days", "32 days"], &mut sel, None);
+                        if sel != before {
+                            st.history_days = days[sel];
+                            changed = true;
+                        }
+                    });
+                    let mut clear_from = None;
+                    row(ui, "Clear recent history", "Deletes graph and usage data from the chosen time onward.", |ui| {
+                        let now = store::now();
+                        let midnight = chrono::Local::now().date_naive().and_hms_opt(0, 0, 0).and_then(|d| d.and_local_timezone(chrono::Local).earliest()).map_or(now - 86_400, |d| d.timestamp());
+                        for (label, since) in [("Last 7 days", midnight - 6 * 86_400), ("Today", midnight), ("Last hour", now - 3_600)] {
+                            if theme::pill(ui, label, None, false).clicked() {
+                                clear_from = Some((label, since));
+                            }
+                        }
+                    });
+                    if let Some((label, since)) = clear_from {
+                        s.store.clear_since(since);
+                        s.toast = Some(format!("Cleared history: {}", label.to_lowercase()));
+                    }
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             theme::label(ui, "Reset usage history", theme::semibold(14.5), c::text());
@@ -230,7 +292,6 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                         });
                     });
                 });
-                let st = &mut s.store.data.settings;
                 let mut clear_log = false;
                 ui.add_space(20.0);
 
@@ -238,6 +299,7 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                 ui.add_space(6.0);
                 theme::card(ui, |ui| {
                     ui.set_width(width - 32.0);
+                    let st = &mut s.store.data.settings;
                     changed |= toggle_row(ui, "Close open connections when blocking", "Cuts an app off immediately. Some apps (e.g. browsers) then need a restart after you unblock them.", &mut st.close_on_block);
                     changed |= toggle_row(ui, "Keep running in the tray", "Closing the window keeps monitoring in the background.", &mut st.close_to_tray);
                     let mut startup = st.run_on_startup;
@@ -245,6 +307,19 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                         actions.push(Action::RunOnStartup(startup));
                     }
                     changed |= toggle_row(ui, "Look up host names", "Resolve remote IP addresses to names with reverse DNS.", &mut st.dns_lookup);
+                    let hidden = s.store.data.apps.values().filter(|a| a.hidden).count();
+                    let mut unhide = false;
+                    row(ui, "Hidden apps", &format!("{hidden} app{} hidden from the lists (hide one from its details popup, under More). Their traffic still counts.", if hidden == 1 { "" } else { "s" }), |ui| {
+                        if ui.add_enabled_ui(hidden > 0, |ui| theme::pill(ui, "Show all", None, false)).inner.clicked() {
+                            unhide = true;
+                        }
+                    });
+                    if unhide {
+                        for a in s.store.data.apps.values_mut() {
+                            a.hidden = false;
+                        }
+                        changed = true;
+                    }
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             theme::label(ui, "Administrator mode", theme::semibold(14.5), c::text());

@@ -152,6 +152,8 @@ pub struct Shared {
     pub adapters: Vec<Adapter>,
     /// Networks the scanner can sweep (refreshed every 10 s).
     pub lans: Vec<system::Lan>,
+    /// Windows Firewall is off on some profile (refreshed every 10 s).
+    pub windows_firewall_off: bool,
     pub hw: Hardware,
     pub names: HashMap<IpAddr, String>,
     pub internet: Option<bool>,
@@ -208,6 +210,7 @@ impl Monitor {
             meta: HashMap::new(),
             adapters: Vec::new(),
             lans: Vec::new(),
+            windows_firewall_off: false,
             hw: Hardware::default(),
             names: HashMap::new(),
             internet: None,
@@ -494,6 +497,21 @@ impl Monitor {
                     s.store.mark_dirty();
                 }
             }
+            if st.monitor_hosts {
+                if let Some(now) = system::hosts_file_hash() {
+                    let mut s = self.lock();
+                    if s.store.data.hosts_hash.as_deref() != Some(now.as_str()) {
+                        if s.store.data.hosts_hash.is_some() {
+                            s.store.add_event(EventKind::HostsChanged, None, "entries were added, removed or edited".into());
+                            if st.notifications {
+                                notify("The hosts file changed. Programs may now reach different servers for some names.");
+                            }
+                        }
+                        s.store.data.hosts_hash = Some(now);
+                        s.store.mark_dirty();
+                    }
+                }
+            }
             if st.monitor_proxy {
                 let now = system::proxy_settings();
                 let mut s = self.lock();
@@ -514,7 +532,12 @@ impl Monitor {
                 }
             }
             let lans = system::lans();
-            self.lock().lans = lans;
+            let wf_off = system::windows_firewall_off();
+            {
+                let mut s = self.lock();
+                s.lans = lans;
+                s.windows_firewall_off = wf_off;
+            }
             tick += 1;
             std::thread::sleep(Duration::from_secs(10));
         }
@@ -651,6 +674,10 @@ impl Monitor {
                 };
                 let joined: Vec<String> = s.online.iter().filter(|m| !previous.contains(*m) && s.store.data.devices[*m].first_seen != t).cloned().collect();
                 let left: Vec<String> = previous.iter().filter(|m| !s.online.contains(*m)).cloned().collect();
+                // trusted devices stay quiet when the user asked for alerts on unknown ones only
+                let quiet = |s: &Shared, mac: &str| s.store.data.settings.alert_untrusted_only && s.store.data.devices.get(mac).is_some_and(|d| d.trusted);
+                let joined: Vec<String> = joined.into_iter().filter(|m| !quiet(&s, m)).collect();
+                let left: Vec<String> = left.into_iter().filter(|m| !quiet(&s, m)).collect();
                 for (macs, kind, verb) in [(joined, EventKind::DeviceJoined, "joined"), (left, EventKind::DeviceLeft, "left")] {
                     for mac in macs {
                         let l = label(&s, &mac);

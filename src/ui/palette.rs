@@ -77,9 +77,33 @@ pub fn light() -> Palette {
 }
 
 static CURRENT: RwLock<Option<Palette>> = RwLock::new(None);
+static GRAPH: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Graph colour preset (Settings → Graph colours); 0 keeps the theme's teal and orchid.
+pub fn set_graph_colors(i: u8) {
+    GRAPH.store(i, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// (download, upload) for a preset on a dark or light theme. Preset 1 uses the Okabe–Ito
+/// sky blue and orange, which stay distinct for the common kinds of colour blindness.
+pub fn graph_pair(i: u8, light: bool) -> Option<(Color32, Color32)> {
+    match (i, light) {
+        (1, false) => Some((rgb(0x56b4e9), rgb(0xe69f00))),
+        (1, true) => Some((rgb(0x0072b2), rgb(0xd55e00))),
+        (2, false) => Some((rgb(0x22d3ee), rgb(0xf472b6))),
+        (2, true) => Some((rgb(0x0891b2), rgb(0xdb2777))),
+        _ => None,
+    }
+}
 
 pub fn current() -> Palette {
-    CURRENT.read().ok().and_then(|p| *p).unwrap_or_else(dark)
+    let mut p = CURRENT.read().ok().and_then(|p| *p).unwrap_or_else(dark);
+    let light = p.bg.r() > 128;
+    if let Some((down, up)) = graph_pair(GRAPH.load(std::sync::atomic::Ordering::Relaxed), light) {
+        p.down = down;
+        p.up = up;
+    }
+    p
 }
 
 pub fn set(p: Palette) {
@@ -169,6 +193,17 @@ mod tests {
             assert!(hue_gap(p.down, p.up) >= 90.0);
             assert!(hue_gap(p.down, p.good) >= 25.0);
         }
+    }
+
+    #[test]
+    fn graph_presets_keep_data_hues_apart() {
+        for i in 1..=2 {
+            for light in [false, true] {
+                let (d, u) = graph_pair(i, light).unwrap();
+                assert!(hue_gap(d, u) >= 90.0, "preset {i}");
+            }
+        }
+        assert!(graph_pair(0, false).is_none());
     }
 
     #[test]

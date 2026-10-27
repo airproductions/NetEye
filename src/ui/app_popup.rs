@@ -72,6 +72,12 @@ pub fn alerts_for<'a>(events: &'a [Event], key: &str) -> Vec<&'a Event> {
     v
 }
 
+/// A web search for an app's file name ("what is foo.exe").
+pub fn search_url(q: &str) -> String {
+    let enc: String = q.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+    format!("https://duckduckgo.com/?q=%22{enc}%22")
+}
+
 pub fn vt_url(sha256_hex: &str) -> String {
     format!("https://www.virustotal.com/gui/file/{sha256_hex}")
 }
@@ -357,6 +363,7 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
     // footer menu
     let mut menu_layer = None;
     let mut copied = false;
+    let mut toggle_hidden = false;
     if let Some((m, anchor)) = pop.menu {
         let mut close = false;
         let items: Vec<(&str, bool, bool, Option<&str>)> = match m {
@@ -369,7 +376,8 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
             }
             Menu::More => {
                 let tip = path.is_none().then_some("No file path for this app");
-                vec![("Open file location", false, path.is_some(), tip), ("Copy path", false, path.is_some(), tip)]
+                let hide = if rec.as_ref().is_some_and(|r| r.hidden) { "Show in app lists" } else { "Hide from app lists" };
+                vec![("Open file location", false, path.is_some(), tip), ("Copy path", false, path.is_some(), tip), ("Search online", false, true, None), (hide, false, key != OTHER_KEY, None)]
             }
             Menu::Path => vec![("Copy Path", false, true, None), ("Open File Location", false, true, None)],
         };
@@ -420,6 +428,12 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
                                             let _ = std::process::Command::new("explorer.exe").raw_arg(format!("/select,\"{p}\"")).spawn();
                                         }
                                     }
+                                    (Menu::More, 2) => {
+                                        // the file name says more to a search engine than the display name
+                                        let q = path.as_deref().and_then(|p| Path::new(p).file_name()).map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| name.clone());
+                                        let _ = std::process::Command::new("explorer.exe").arg(search_url(&q)).spawn();
+                                    }
+                                    (Menu::More, 3) => toggle_hidden = true,
                                     (Menu::More, _) | (Menu::Path, _) => {
                                         if let Some(p) = &path {
                                             ctx.copy_text(p.clone());
@@ -438,6 +452,14 @@ pub fn show(ctx: &Context, slot: &mut Option<AppPopup>, s: &mut Shared, icons: &
     }
     if copied {
         s.toast = Some("Path copied".into());
+    }
+    if toggle_hidden {
+        if let Some(a) = s.store.data.apps.get_mut(&key) {
+            a.hidden = !a.hidden;
+            let msg = if a.hidden { format!("{name} is hidden from the app lists. Unhide it in Settings.") } else { format!("{name} is back in the app lists") };
+            s.store.mark_dirty();
+            s.toast = Some(msg);
+        }
     }
 
     if vt_click {
@@ -496,6 +518,11 @@ mod tests {
         let got: Vec<i64> = alerts_for(&events, "a").iter().map(|e| e.t).collect();
         assert_eq!(got, vec![3, 1]);
         assert!(alerts_for(&events, "zzz").is_empty());
+    }
+
+    #[test]
+    fn search_url_quotes_and_encodes() {
+        assert_eq!(search_url("svc host.exe"), "https://duckduckgo.com/?q=%22svc%20host.exe%22");
     }
 
     #[test]

@@ -52,7 +52,20 @@ pub struct ScannerPage {
     editing: Option<(String, String)>,
 }
 
+/// Device types the user can pick by hand (the type icon's menu).
+const TYPE_CHOICES: [(Glyph, &str); 6] = [
+    (Glyph::Router, "Router"),
+    (Glyph::Computer, "Computer"),
+    (Glyph::Phone, "Phone"),
+    (Glyph::Tv, "Media"),
+    (Glyph::Router, "Network"),
+    (Glyph::Device, "Device"),
+];
+
 fn kind(d: &DeviceRecord, gateway: Option<&str>, local: Option<&str>) -> (Glyph, &'static str) {
+    if let Some(choice) = d.kind.as_deref().and_then(|k| TYPE_CHOICES.iter().find(|(_, n)| *n == k)) {
+        return *choice;
+    }
     let vendor = d.vendor.clone().unwrap_or_default().to_lowercase();
     let name = d.name.clone().unwrap_or_default().to_lowercase();
     if Some(d.ip.as_str()) == gateway {
@@ -182,6 +195,7 @@ impl ScannerPage {
             theme::empty_state(&p, full.center(), if s.scanning { "Looking for devices…" } else { "No devices found yet. Press Scan." });
             return;
         }
+        let mut forget: Option<String> = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, ROW_H, devices.len(), |ui, range| {
             for i in range {
                 let row = &devices[i];
@@ -204,7 +218,43 @@ impl ScannerPage {
                 let ir = Rect::from_center_size(Pos2::new(cols[1] + 16.0, y), Vec2::splat(30.0));
                 p.circle_stroke(ir.center(), 17.0, Stroke::new(1.0_f32, c::border()));
                 theme::glyph(p, ir.shrink(5.0), g, if online { c::text() } else { c::muted() });
-                ui.interact(ir, ui.id().with(("kind", i)), Sense::hover()).on_hover_text(kname);
+                // the type icon opens a menu to set the type by hand
+                let kresp = ui.interact(ir, ui.id().with(("kind", i)), Sense::click()).on_hover_text(format!("{kname} · click to change"));
+                let popup = ui.id().with(("kind-menu", &d.mac));
+                if kresp.clicked() {
+                    ui.memory_mut(|m| m.toggle_popup(popup));
+                }
+                let mut pick: Option<Option<String>> = None;
+                egui::popup_below_widget(ui, popup, &kresp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                    ui.set_min_width(160.0);
+                    for (g, name) in TYPE_CHOICES {
+                        let (rr, rresp) = ui.allocate_exact_size(Vec2::new(160.0, 28.0), Sense::click());
+                        if rresp.hovered() {
+                            ui.painter().rect_filled(rr, CornerRadius::same(6), c::hover());
+                        }
+                        theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(rr.left() + 16.0, rr.center().y), Vec2::splat(15.0)), g, c::muted());
+                        let col = if d.kind.as_deref() == Some(name) { c::accent() } else { c::text() };
+                        ui.painter().text(Pos2::new(rr.left() + 34.0, rr.center().y), Align2::LEFT_CENTER, name, theme::regular(13.5), col);
+                        if rresp.clicked() {
+                            pick = Some(Some(name.to_string()));
+                        }
+                    }
+                    let (rr, rresp) = ui.allocate_exact_size(Vec2::new(160.0, 28.0), Sense::click());
+                    if rresp.hovered() {
+                        ui.painter().rect_filled(rr, CornerRadius::same(6), c::hover());
+                    }
+                    ui.painter().text(Pos2::new(rr.left() + 34.0, rr.center().y), Align2::LEFT_CENTER, "Automatic", theme::regular(13.5), c::muted());
+                    if rresp.clicked() {
+                        pick = Some(None);
+                    }
+                });
+                if let Some(k) = pick {
+                    if let Some(dev) = s.store.data.devices.get_mut(&d.mac) {
+                        dev.kind = k;
+                        s.store.mark_dirty();
+                    }
+                    ui.memory_mut(|m| m.close_popup());
+                }
                 let tc = if online { c::text() } else { c::muted() };
                 let name = row.name.clone();
                 let nr = Rect::from_min_max(Pos2::new(cols[2] - 4.0, y - 14.0), Pos2::new(cols[3] - 12.0, y + 14.0));
@@ -249,8 +299,35 @@ impl ScannerPage {
                         theme::text(p, Pos2::new(lay[ci].0, y), text, theme::regular(13.5), color, lay[ci].1 - lay[ci].0 - 10.0);
                     }
                 }
+                // trusted mark beside the name; trust and forget on hover at the row's end
+                if d.trusted {
+                    theme::glyph(p, Rect::from_center_size(Pos2::new(cols[2] - 12.0, y), Vec2::splat(12.0)), Glyph::Check, c::good());
+                }
+                if resp.hovered() || ui.rect_contains_pointer(r) {
+                    let acts = Rect::from_min_max(Pos2::new(r.right() - 190.0, r.top() + 8.0), Pos2::new(r.right() - 8.0, r.bottom() - 8.0));
+                    ui.painter().rect_filled(acts, CornerRadius::same(6), c::hover());
+                    let mut aui = ui.new_child(egui::UiBuilder::new().max_rect(acts).layout(egui::Layout::right_to_left(egui::Align::Center)));
+                    aui.add_space(4.0);
+                    if theme::pill(&mut aui, "Forget", None, false).on_hover_text("Remove this device. It shows up as new if it joins again.").clicked() {
+                        forget = Some(d.mac.clone());
+                    }
+                    let tl = if d.trusted { "Untrust" } else { "Trust" };
+                    let tip = if d.trusted { "Treat this device as unknown again" } else { "Mark as a known device (quiet join/leave alerts in Settings)" };
+                    if theme::pill(&mut aui, tl, None, false).on_hover_text(tip).clicked() {
+                        if let Some(dev) = s.store.data.devices.get_mut(&d.mac) {
+                            dev.trusted = !dev.trusted;
+                            s.store.mark_dirty();
+                        }
+                    }
+                }
             }
         });
+        if let Some(mac) = forget {
+            s.store.data.devices.remove(&mac);
+            s.online.remove(&mac);
+            s.store.mark_dirty();
+            s.toast = Some("Device forgotten".into());
+        }
     }
 }
 

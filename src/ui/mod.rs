@@ -7,6 +7,7 @@ mod host_popup;
 mod log;
 mod markers;
 mod motion;
+mod png;
 pub mod palette;
 mod scanner;
 mod settings;
@@ -47,6 +48,8 @@ pub enum Action {
     OpenSettings,
     /// Write the Usage view (rows, file name) to Downloads as CSV and reveal it.
     ExportUsage(Vec<csv_export::ExportRow>, String),
+    /// Save this part of the window (the graph) as a PNG in Downloads.
+    SaveGraph(Rect),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -61,6 +64,8 @@ enum Page {
 
 pub struct NetEyeApp {
     monitor: Monitor,
+    /// Graph area waiting for the screenshot SaveGraph asked for.
+    shot: Option<Rect>,
     page: Page,
     icons: Icons,
     traffic: traffic::TrafficPage,
@@ -96,7 +101,7 @@ impl NetEyeApp {
             }
         });
         let quit = Arc::new(AtomicBool::new(false));
-        let tray = build_tray(&cc.egui_ctx, hwnd, quit.clone());
+        let tray = build_tray(&cc.egui_ctx, hwnd, quit.clone(), monitor.clone());
         crate::diag::log(&format!("ui ready: tray={} hwnd={}", tray.is_some(), hwnd.is_some()));
         // keep the startup entry on this exe and name (it was registered as "Vantage" before)
         if monitor.lock().store.data.settings.run_on_startup {
@@ -112,6 +117,7 @@ impl NetEyeApp {
             scanner: Default::default(),
             hardware: Default::default(),
             toast: None,
+            shot: None,
             app_popup: None,
             pending_blocks: VecDeque::new(),
             page_changed: Instant::now() - std::time::Duration::from_secs(1),
@@ -176,6 +182,10 @@ impl NetEyeApp {
                     let dir = self.monitor.lock().store.dir.clone();
                     let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
                 }
+                Action::SaveGraph(rect) => {
+                    self.shot = Some(rect);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+                }
                 Action::ExportUsage(rows, name) => {
                     self.export_usage(&rows, &name);
                     ctx.request_repaint();
@@ -187,6 +197,48 @@ impl NetEyeApp {
 
 impl NetEyeApp {
     /// Runs after the lock is released: writes the CSV to Downloads, toasts, then reveals it.
+    /// A screenshot asked for by SaveGraph arrived: crop it to the graph and save a PNG.
+    fn save_shot(&mut self, ctx: &egui::Context) {
+        let Some(rect) = self.shot else { return };
+        let img = ctx.input(|i| {
+            i.raw.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        let Some(img) = img else { return };
+        self.shot = None;
+        let ppp = ctx.pixels_per_point();
+        let [w, h] = img.size;
+        let x0 = ((rect.left() * ppp).round().max(0.0) as usize).min(w);
+        let y0 = ((rect.top() * ppp).round().max(0.0) as usize).min(h);
+        let x1 = ((rect.right() * ppp).round() as usize).clamp(x0, w);
+        let y1 = ((rect.bottom() * ppp).round() as usize).clamp(y0, h);
+        if x1 == x0 || y1 == y0 {
+            return;
+        }
+        let mut rgba = Vec::with_capacity((x1 - x0) * (y1 - y0) * 4);
+        for y in y0..y1 {
+            for px in &img.pixels[y * w + x0..y * w + x1] {
+                rgba.extend_from_slice(&px.to_array());
+            }
+        }
+        let name = format!("NetEye graph {}.png", chrono::Local::now().format("%Y-%m-%d %H-%M-%S"));
+        let Some(dir) = downloads_dir() else {
+            self.toast = Some(("Could not find the Downloads folder".into(), Instant::now()));
+            return;
+        };
+        let path = dir.join(&name);
+        match std::fs::write(&path, png::encode_rgba((x1 - x0) as u32, (y1 - y0) as u32, &rgba)) {
+            Ok(()) => {
+                self.toast = Some((format!("Saved {name} to Downloads"), Instant::now()));
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("explorer").raw_arg(format!("/select,\"{}\"", path.display())).spawn();
+            }
+            Err(_) => self.toast = Some(("Could not save the image".into(), Instant::now())),
+        }
+    }
+
     fn export_usage(&mut self, rows: &[csv_export::ExportRow], name: &str) {
         let Some(dir) = downloads_dir() else {
             self.toast = Some(("Could not find the Downloads folder".into(), Instant::now()));
@@ -226,6 +278,7 @@ fn downloads_dir() -> Option<std::path::PathBuf> {
 impl eframe::App for NetEyeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.log_frames(ctx);
+        self.save_shot(ctx);
         let quitting = self.quit.load(Ordering::SeqCst);
         let (close_to_tray, appearance) = {
             let s = self.monitor.lock();
@@ -252,6 +305,12 @@ impl eframe::App for NetEyeApp {
             }
             let unread = log::unread_important(&s.store.data.events);
             theme::set_speed_bits(s.store.data.settings.speed_bits);
+            theme::set_clock_24h(s.store.data.settings.clock_24h);
+            palette::set_graph_colors(s.store.data.settings.graph_colors);
+            let zoom = [0.9, 1.0, 1.1, 1.25][usize::from(s.store.data.settings.text_scale.min(3))];
+            if (ctx.zoom_factor() - zoom).abs() > 0.001 {
+                ctx.set_zoom_factor(zoom);
+            }
 
             egui::TopBottomPanel::top("nav")
                 .exact_height(78.0)
@@ -592,8 +651,9 @@ fn window_shown(hwnd: isize) -> bool {
     unsafe { IsWindowVisible(hwnd as _) != 0 && IsIconic(hwnd as _) == 0 }
 }
 
-fn build_tray(ctx: &egui::Context, hwnd: Option<isize>, quit: Arc<AtomicBool>) -> Option<tray_icon::TrayIcon> {
-    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+fn build_tray(ctx: &egui::Context, hwnd: Option<isize>, quit: Arc<AtomicBool>, monitor: Monitor) -> Option<tray_icon::TrayIcon> {
+    use crate::store::FirewallMode;
+    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
     use tray_icon::{MouseButton, TrayIconBuilder, TrayIconEvent};
     use windows_sys::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW};
 
@@ -601,8 +661,22 @@ fn build_tray(ctx: &egui::Context, hwnd: Option<isize>, quit: Arc<AtomicBool>) -
     let menu = Menu::new();
     let open = MenuItem::new("Open NetEye", true, None);
     let exit = MenuItem::new("Quit", true, None);
-    menu.append_items(&[&open, &PredefinedMenuItem::separator(), &exit]).ok()?;
+    // firewall mode and snooze without opening the window
+    let modes = [
+        (MenuItem::new("Click to Block", true, None), FirewallMode::ClickToBlock),
+        (MenuItem::new("Ask to Connect", true, None), FirewallMode::AskToConnect),
+        (MenuItem::new("Block All", true, None), FirewallMode::BlockAll),
+    ];
+    let fw = Submenu::new("Firewall mode", true);
+    for (item, _) in &modes {
+        fw.append(item).ok()?;
+    }
+    let snooze = MenuItem::new("Pause notifications for 1 hour", true, None);
+    let resume = MenuItem::new("Resume notifications", true, None);
+    menu.append_items(&[&open, &PredefinedMenuItem::separator(), &fw, &snooze, &resume, &PredefinedMenuItem::separator(), &exit]).ok()?;
     let (open_id, exit_id) = (open.id().clone(), exit.id().clone());
+    let (snooze_id, resume_id) = (snooze.id().clone(), resume.id().clone());
+    let mode_ids: Vec<(tray_icon::menu::MenuId, FirewallMode)> = modes.iter().map(|(i, m)| (i.id().clone(), *m)).collect();
 
     let show = {
         let ctx = ctx.clone();
@@ -630,6 +704,14 @@ fn build_tray(ctx: &egui::Context, hwnd: Option<isize>, quit: Arc<AtomicBool>) -
         } else if e.id == exit_id {
             quit.store(true, Ordering::SeqCst);
             show();
+        } else if e.id == snooze_id || e.id == resume_id {
+            let mut s = monitor.lock();
+            s.store.data.settings.snooze_until = (e.id == snooze_id).then(|| crate::store::now() + 3600);
+            s.store.mark_dirty();
+        } else if let Some((_, mode)) = mode_ids.iter().find(|(id, _)| *id == e.id) {
+            // off the tray's thread: a mode change can wait on a UAC prompt
+            let (m, mode) = (monitor.clone(), *mode);
+            std::thread::spawn(move || m.set_firewall_mode(mode));
         }
     }));
     TrayIconBuilder::new().with_icon(icon).with_tooltip("NetEye — network monitor").with_menu(Box::new(menu)).build().ok()

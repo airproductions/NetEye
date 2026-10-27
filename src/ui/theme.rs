@@ -168,12 +168,33 @@ pub fn local(t: i64) -> chrono::DateTime<chrono::Local> {
     chrono::DateTime::from_timestamp(t, 0).unwrap_or_default().with_timezone(&chrono::Local)
 }
 
+static CLOCK_24H: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_clock_24h(on: bool) {
+    CLOCK_24H.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn clock_24h() -> bool {
+    CLOCK_24H.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Time of day in the user's clock style: "14:05" / "2:05 PM", optionally with seconds.
+pub fn fmt_time(t: i64, seconds: bool) -> String {
+    let f = match (clock_24h(), seconds) {
+        (true, false) => "%H:%M",
+        (true, true) => "%H:%M:%S",
+        (false, false) => "%-I:%M %p",
+        (false, true) => "%-I:%M:%S %p",
+    };
+    local(t).format(f).to_string()
+}
+
 pub fn clock(t: i64) -> String {
-    local(t).format("%-I:%M %p").to_string()
+    fmt_time(t, false)
 }
 
 pub fn date_time(t: i64) -> String {
-    local(t).format("%-d %b %Y, %-I:%M %p").to_string()
+    format!("{}, {}", local(t).format("%-d %b %Y"), fmt_time(t, false))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -236,6 +257,7 @@ pub enum Glyph {
     Pause,
     Play,
     Calendar,
+    Camera,
     BellPlus,
     TypeWeb,
     TypeNames,
@@ -407,6 +429,11 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
         Glyph::Lock => {
             p.rect_stroke(Rect::from_min_max(pt(4.5, 9.0), pt(15.5, 17.5)), CornerRadius::same(2), s, StrokeKind::Middle);
             p.add(Shape::line(arc(pt(10.0, 9.0), 3.6 * u, -3.1416, 0.0), s));
+        }
+        Glyph::Camera => {
+            p.rect_stroke(Rect::from_min_max(pt(2.5, 6.0), pt(17.5, 16.5)), CornerRadius::same(2), s, StrokeKind::Middle);
+            line(&[(6.5, 6.0), (8.0, 3.5), (12.0, 3.5), (13.5, 6.0)]);
+            p.circle_stroke(pt(10.0, 11.2), 3.0 * u, s);
         }
         Glyph::Calendar => {
             p.rect_stroke(Rect::from_min_max(pt(3.0, 4.5), pt(17.0, 17.0)), CornerRadius::same(2), s, StrokeKind::Middle);

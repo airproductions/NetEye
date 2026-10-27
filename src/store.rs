@@ -10,8 +10,12 @@ use serde::{Deserialize, Serialize};
 pub const MINUTE: i64 = 60;
 pub const HOUR: i64 = 3600;
 const MAX_MINUTES: usize = 24 * 60;
-const MAX_HOURS: usize = 32 * 24;
 const MAX_EVENTS: usize = 2000;
+
+/// Hour buckets kept for a `history_days` setting (7 to 32 days).
+fn history_hours(days: u16) -> usize {
+    usize::from(days.clamp(7, 32)) * 24
+}
 const MAX_APP_HOSTS: usize = 64;
 
 /// Writers of `data.json` take turns on this lock.
@@ -98,6 +102,21 @@ pub struct Settings {
     pub auto_scan: bool,
     /// MAC of the adapter whose network the scanner sweeps; empty picks one automatically.
     pub scan_adapter: String,
+    /// Only devices you haven't marked trusted raise join/leave alerts.
+    pub alert_untrusted_only: bool,
+    /// Text size: 0 small (90%), 1 normal, 2 large (110%), 3 larger (125%).
+    pub text_scale: u8,
+    pub clock_24h: bool,
+    /// Graph colours: 0 teal & orchid, 1 sky & orange (colour-blind safe), 2 cyan & pink.
+    pub graph_colors: u8,
+    /// Days of hourly history kept (7, 14 or 32).
+    pub history_days: u16,
+    /// Alerts kept in the activity log.
+    pub event_limit: u32,
+    /// Also write alerts to the Windows Event Log (Application, source "NetEye").
+    pub event_log: bool,
+    /// Alert when the hosts file (System32\drivers\etc\hosts) changes.
+    pub monitor_hosts: bool,
     pub appearance: Appearance,
     pub scan_minutes: u32,
     /// Also log known devices rejoining and devices leaving the network.
@@ -178,6 +197,14 @@ impl Default for Settings {
             firewall_enabled: true,
             auto_scan: true,
             scan_adapter: String::new(),
+            alert_untrusted_only: false,
+            text_scale: 1,
+            clock_24h: false,
+            graph_colors: 0,
+            history_days: 32,
+            event_limit: MAX_EVENTS as u32,
+            event_log: false,
+            monitor_hosts: true,
             appearance: Appearance::System,
             scan_minutes: 5,
             notify_device_presence: false,
@@ -222,6 +249,8 @@ pub struct AppRecord {
     pub block_in: bool,
     pub block_out: bool,
     pub hosts: Vec<String>,
+    /// Hidden from the app lists (its traffic still counts in totals).
+    pub hidden: bool,
 }
 
 impl AppRecord {
@@ -494,10 +523,10 @@ fn heavy_fixture_with(minute_flow_cap: usize, hour_flow_cap: usize) -> Data {
 
     let start = 1_789_999_200 - 32 * 24 * HOUR;
     let mut d = Data { created: start, ..Default::default() };
-    for i in 0..MAX_HOURS {
+    for i in 0..history_hours(32) {
         d.hours.push_back(Bucket { t: start + i as i64 * HOUR, ..hour.clone() });
     }
-    let minutes_from = start + (MAX_HOURS as i64 - 24) * HOUR;
+    let minutes_from = start + (history_hours(32) as i64 - 24) * HOUR;
     for i in 0..MAX_MINUTES {
         d.minutes.push_back(Bucket { t: minutes_from + i as i64 * MINUTE, ..minute.clone() });
     }
@@ -527,6 +556,10 @@ pub struct DeviceRecord {
     pub vendor: Option<String>,
     /// Name the user gave the device; shown instead of the discovered name.
     pub label: Option<String>,
+    /// Marked as known by the user; see `Settings::alert_untrusted_only`.
+    pub trusted: bool,
+    /// Device type the user picked (scanner type names), overriding the guess.
+    pub kind: Option<String>,
     pub first_seen: i64,
     pub last_seen: i64,
 }
@@ -546,6 +579,7 @@ pub enum EventKind {
     DnsChanged,
     ProxyChanged,
     Rdp,
+    HostsChanged,
 }
 
 impl EventKind {
@@ -562,6 +596,7 @@ impl EventKind {
             Self::DnsChanged => "DNS server settings monitor",
             Self::ProxyChanged => "Proxy settings monitor",
             Self::Rdp => "RDP detection",
+            Self::HostsChanged => "Hosts file monitor",
         }
     }
     pub fn important(self) -> bool {
@@ -601,6 +636,8 @@ pub struct Data {
     pub gateway_mac: Option<(String, String)>,
     pub dns_servers: Option<Vec<String>>,
     pub proxy: Option<String>,
+    /// SHA-256 of the hosts file at the last check.
+    pub hosts_hash: Option<String>,
     pub profiles: BTreeMap<String, Profile>,
     pub active_profile: Option<String>,
     next_event: u64,
@@ -684,8 +721,12 @@ impl Store {
         self.data.next_event += 1;
         let e = Event { id: self.data.next_event, t: now(), kind, app, subject, read: false };
         self.data.events.push_front(e.clone());
-        self.data.events.truncate(MAX_EVENTS);
+        self.data.events.truncate(self.data.settings.event_limit.clamp(100, 100_000) as usize);
         self.dirty = true;
+        if self.data.settings.event_log {
+            let app = e.app.as_deref().and_then(|k| self.data.apps.get(k)).map(|a| format!("{}: ", a.name)).unwrap_or_default();
+            crate::system::write_event_log(&format!("{} — {app}{}", kind.source(), e.subject), kind.important());
+        }
         e
     }
 
@@ -707,7 +748,7 @@ impl Store {
         }
         let lists = [
             (&mut self.data.minutes, MINUTE, MAX_MINUTES, MINUTE_FLOW_CAP, MINUTE_HOST_CAP),
-            (&mut self.data.hours, HOUR, MAX_HOURS, HOUR_FLOW_CAP, HOUR_HOST_CAP),
+            (&mut self.data.hours, HOUR, history_hours(self.data.settings.history_days), HOUR_FLOW_CAP, HOUR_HOST_CAP),
         ];
         for (list, size, max, flow_cap, host_cap) in lists {
             let b = bucket(list, t, size, max, flow_cap, host_cap);
@@ -777,6 +818,17 @@ impl Store {
             used = used.saturating_sub(lan);
         }
         (used, label)
+    }
+
+    /// Deletes recorded traffic from `since` (unix seconds) onward: graph buckets and daily totals.
+    /// Lifetime per-app totals are left alone; they have no per-period split.
+    pub fn clear_since(&mut self, since: i64) {
+        self.data.minutes.retain(|b| b.t + MINUTE <= since);
+        self.data.hours.retain(|b| b.t + HOUR <= since);
+        let day = chrono::DateTime::from_timestamp(since, 0).unwrap_or_default().with_timezone(&chrono::Local).format("%Y-%m-%d").to_string();
+        self.data.daily.retain(|d, _| *d < day);
+        self.data.daily_lan.retain(|d, _| *d < day);
+        self.dirty = true;
     }
 
     pub fn reset_usage(&mut self) {
@@ -1120,6 +1172,46 @@ mod flow_tests {
     }
 
     #[test]
+    fn event_limit_caps_the_log() {
+        let mut st = store();
+        st.data.settings.event_limit = 100;
+        for i in 0..150 {
+            st.add_event(EventKind::Rdp, None, format!("10.0.0.{i}"));
+        }
+        assert_eq!(st.data.events.len(), 100);
+        assert_eq!(st.data.events.front().unwrap().subject, "10.0.0.149");
+    }
+
+    #[test]
+    fn history_days_bound_the_hour_buckets() {
+        assert_eq!(history_hours(7), 168);
+        assert_eq!(history_hours(1), 168);
+        assert_eq!(history_hours(99), 768);
+        let mut st = store();
+        st.data.settings.history_days = 7;
+        let none = HashMap::new();
+        for h in 0..200 {
+            st.add_usage(h * HOUR, [1, 1, 0, 0], &none, &none, &HashMap::new());
+        }
+        assert_eq!(st.data.hours.len(), 168);
+    }
+
+    #[test]
+    fn clear_since_drops_later_buckets_only() {
+        let mut st = store();
+        let none = HashMap::new();
+        let base = 1_000_000 * 60;
+        for m in 0..120 {
+            st.add_usage(base + m * MINUTE, [1, 1, 0, 0], &none, &none, &HashMap::new());
+        }
+        let cut = base + 60 * MINUTE;
+        st.clear_since(cut);
+        assert!(st.data.minutes.iter().all(|b| b.t + MINUTE <= cut));
+        assert_eq!(st.data.minutes.len(), 60);
+        assert!(st.data.hours.iter().all(|b| b.t + HOUR <= cut));
+    }
+
+    #[test]
     fn snapshot_only_when_dirty() {
         let mut st = store();
         assert!(st.snapshot().is_none());
@@ -1189,7 +1281,7 @@ mod flow_tests {
     fn heavy_profile_under_budget() {
         let d = heavy_fixture();
         assert_eq!(d.minutes.len(), MAX_MINUTES);
-        assert_eq!(d.hours.len(), MAX_HOURS);
+        assert_eq!(d.hours.len(), history_hours(32));
         let m = &d.minutes[0];
         let h = &d.hours[0];
         assert!(m.flows.len() >= 8 && h.flows.len() >= 25);

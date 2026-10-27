@@ -27,6 +27,10 @@ pub struct FirewallPage {
     hide_active: bool,
     /// Name being typed for a new profile, while the save field is open.
     new_profile: Option<String>,
+    hide_uninstalled: bool,
+    /// Apps whose file is gone from disk, and when that was last checked.
+    missing: HashSet<String>,
+    missing_at: Option<std::time::Instant>,
 }
 
 /// No saved sort: Active by traffic then name, Inactive by last seen. No header shows an arrow.
@@ -164,10 +168,28 @@ impl FirewallPage {
             s.store.mark_dirty();
         }
 
+        // Windows Firewall off and no other firewall registered: say so above the list
+        let third_party = s.firewall_product.as_deref().is_some_and(|p| !p.to_lowercase().contains("windows"));
+        if s.windows_firewall_off && !third_party {
+            let (wr, _) = ui.allocate_exact_size(Vec2::new(full.width(), 34.0), Sense::hover());
+            ui.painter().rect_filled(wr, CornerRadius::ZERO, theme::with_alpha(c::warn(), 30));
+            theme::glyph(ui.painter(), Rect::from_center_size(Pos2::new(wr.left() + 28.0, wr.center().y), Vec2::splat(16.0)), Glyph::Shield, c::warn());
+            ui.painter().text(Pos2::new(wr.left() + 46.0, wr.center().y), Align2::LEFT_CENTER, "Windows Firewall is turned off for at least one network type. NetEye's blocks still apply, but nothing else is filtering incoming traffic.", theme::regular(13.0), c::text());
+        }
+
+        // which apps' files are gone (checked every 10 s, not every frame)
+        if self.missing_at.is_none_or(|t| t.elapsed().as_secs() >= 10) {
+            self.missing = s.store.data.apps.iter().filter(|(_, a)| a.path.as_deref().is_some_and(|p| !std::path::Path::new(p).exists())).map(|(k, _)| k.clone()).collect();
+            self.missing_at = Some(std::time::Instant::now());
+        }
         let q = self.search.to_lowercase();
         let mut active: Vec<FwRow> = Vec::new();
         let mut inactive: Vec<FwRow> = Vec::new();
+        let mut uninstalled: Vec<FwRow> = Vec::new();
         for (k, a) in &s.store.data.apps {
+            if a.hidden {
+                continue;
+            }
             let name = s.app_name(k);
             let hay = format!("{} {} {}", name, a.publisher.clone().unwrap_or_default(), a.hosts.join(" ")).to_lowercase();
             if !q.is_empty() && !hay.contains(&q) {
@@ -194,10 +216,18 @@ impl FirewallPage {
                 traffic: rate[0] + rate[1],
                 last_seen: a.last_seen,
             };
-            if live { active.push(fw) } else { inactive.push(fw) }
+            if live {
+                active.push(fw)
+            } else if self.missing.contains(k) {
+                uninstalled.push(fw)
+            } else {
+                inactive.push(fw)
+            }
         }
         sort_group(&mut active, spec, true);
         sort_group(&mut inactive, spec, false);
+        sort_group(&mut uninstalled, spec, false);
+        let mut remove: Vec<String> = Vec::new();
 
         // per-app sparkline series from the last minute of live samples
         let mut spark: HashMap<&str, (Vec<f64>, Vec<f64>)> = HashMap::new();
@@ -232,11 +262,42 @@ impl FirewallPage {
                     self.row(ui, s, icons, actions, &cols, k, name, i, None, enabled);
                 }
             }
-            if active.is_empty() && inactive.is_empty() {
+            if !uninstalled.is_empty() {
+                if section(ui, full.width(), "Uninstalled apps", uninstalled.len(), !self.hide_uninstalled) {
+                    self.hide_uninstalled = !self.hide_uninstalled;
+                }
+                if !self.hide_uninstalled {
+                    // blocked ones stay: their filters would otherwise outlive the list entry
+                    let free: Vec<&FwRow> = uninstalled.iter().filter(|r| !r.block_in && !r.block_out).collect();
+                    let (br, _) = ui.allocate_exact_size(Vec2::new(full.width(), 40.0), Sense::hover());
+                    let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(br.shrink2(Vec2::new(28.0, 4.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                    theme::label(&mut bui, "These apps' files are no longer on disk.", theme::regular(13.0), c::muted());
+                    bui.add_space(10.0);
+                    let label = format!("Remove {} from the list", free.len());
+                    let resp = bui.add_enabled_ui(!free.is_empty(), |ui| theme::pill(ui, &label, None, false)).inner;
+                    if resp.clicked() {
+                        remove = free.iter().map(|r| r.key.clone()).collect();
+                    }
+                    if free.len() < uninstalled.len() {
+                        resp.on_hover_text("Blocked apps stay until you unblock them, so no rule is left behind.");
+                    }
+                    for (i, FwRow { key: k, name, .. }) in uninstalled.iter().enumerate() {
+                        self.row(ui, s, icons, actions, &cols, k, name, i, None, enabled);
+                    }
+                }
+            }
+            if active.is_empty() && inactive.is_empty() && uninstalled.is_empty() {
                 ui.add_space(60.0);
                 ui.vertical_centered(|ui| theme::label(ui, "No apps match your search.", theme::regular(14.0), c::muted()));
             }
         });
+        if !remove.is_empty() {
+            for k in &remove {
+                s.store.data.apps.remove(k);
+            }
+            s.store.mark_dirty();
+            s.toast = Some(format!("Removed {} uninstalled app{}", remove.len(), if remove.len() == 1 { "" } else { "s" }));
+        }
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>, full: Rect) {

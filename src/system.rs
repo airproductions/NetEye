@@ -132,6 +132,15 @@ pub fn remove_legacy_rules() -> usize {
 /// Shared or critical Windows processes that must never be blocked.
 pub fn is_protected(program: &str) -> bool {
     let p = program.to_lowercase();
+    // NetEye itself: blocking it would cut its own checks off
+    if std::env::current_exe().is_ok_and(|me| me.to_string_lossy().to_lowercase() == p) {
+        return true;
+    }
+    // Microsoft Defender's engine and services
+    let defender = ["msmpeng.exe", "nissrv.exe", "mpdefendercoreservice.exe", "securityhealthservice.exe", "mpcmdrun.exe"];
+    if p.contains(r"\windows defender\") && defender.iter().any(|d| p.ends_with(d)) {
+        return true;
+    }
     let sys = [r"\windows\system32\", r"\windows\syswow64\"];
     let critical = ["svchost.exe", "services.exe", "lsass.exe", "wininit.exe", "winlogon.exe", "csrss.exe", "smss.exe", "ntoskrnl.exe", "dwm.exe"];
     sys.iter().any(|d| p.contains(d)) && critical.iter().any(|c| p.ends_with(c))
@@ -344,6 +353,43 @@ fn reg_string(key: &str, value: &str) -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..len]))
 }
 
+/// Windows Firewall is switched off on at least one profile (domain, private or public).
+pub fn windows_firewall_off() -> bool {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD};
+    const BASE: &str = r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\";
+    ["DomainProfile", "StandardProfile", "PublicProfile"].iter().any(|p| {
+        let (k, v) = (crate::net::wide(&format!("{BASE}{p}")), crate::net::wide("EnableFirewall"));
+        let mut d: u32 = 1;
+        let mut size = 4u32;
+        let rc = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, k.as_ptr(), v.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), &mut d as *mut u32 as *mut _, &mut size) };
+        rc == 0 && d == 0
+    })
+}
+
+/// SHA-256 of the hosts file, or None when it can't be read.
+pub fn hosts_file_hash() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let bytes = std::fs::read(root.join(r"System32\drivers\etc\hosts")).ok()?;
+    Some(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Writes one alert to the Windows Event Log (Application log, source "NetEye").
+pub fn write_event_log(msg: &str, warning: bool) {
+    use windows_sys::Win32::System::EventLog::{DeregisterEventSource, RegisterEventSourceW, ReportEventW, EVENTLOG_INFORMATION_TYPE, EVENTLOG_WARNING_TYPE};
+    let (src, text) = (crate::net::wide("NetEye"), crate::net::wide(msg));
+    unsafe {
+        let h = RegisterEventSourceW(std::ptr::null(), src.as_ptr());
+        if h.is_null() {
+            return;
+        }
+        let strings = [text.as_ptr()];
+        let kind = if warning { EVENTLOG_WARNING_TYPE } else { EVENTLOG_INFORMATION_TYPE };
+        ReportEventW(h, kind, 0, 1000, std::ptr::null_mut(), 1, 0, strings.as_ptr(), std::ptr::null());
+        DeregisterEventSource(h);
+    }
+}
+
 fn reg_dword(key: &str, value: &str) -> Option<u32> {
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
     let (k, v) = (crate::net::wide(key), crate::net::wide(value));
@@ -429,6 +475,14 @@ pub fn load_oui(dir: &Path) -> HashMap<String, String> {
 #[cfg(test)]
 mod lan_tests {
     use super::*;
+
+    #[test]
+    fn defender_and_core_processes_are_protected() {
+        assert!(is_protected(r"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.2\MsMpEng.exe"));
+        assert!(is_protected(r"C:\Windows\System32\svchost.exe"));
+        assert!(!is_protected(r"C:\Program Files\Mozilla Firefox\firefox.exe"));
+        assert!(!is_protected(r"C:\Users\x\Downloads\MsMpEng.exe"), "only Defender's own folder");
+    }
 
     #[test]
     fn lan_label_shows_subnet() {

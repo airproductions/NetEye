@@ -10,7 +10,7 @@ use crate::monitor::Shared;
 use crate::store::{Event, EventKind};
 
 /// Alert types the filter can narrow to, by their `EventKind::source` name.
-const TYPES: [&str; 11] = [
+const TYPES: [&str; 12] = [
     "First network activity",
     "Internet access monitor",
     "Application info monitor",
@@ -20,6 +20,7 @@ const TYPES: [&str; 11] = [
     "DNS server settings monitor",
     "Proxy settings monitor",
     "RDP detection",
+    "Hosts file monitor",
     "Data usage monitor",
     "Firewall",
 ];
@@ -41,6 +42,7 @@ impl LogPage {
         // Events stay unread until their row is clicked or Mark all read is pressed.
         let mut mark_all = false;
         let mut clicked: Option<u64> = None;
+        let mut deleted: Option<u64> = None;
         let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 72.0), Sense::hover());
         ui.painter().rect_filled(bar, CornerRadius::ZERO, c::panel());
         ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0_f32, c::border()));
@@ -178,13 +180,26 @@ impl LogPage {
                         x = seg(&p, x, cy, &t, bold, max_x);
                     }
                     p.text(Pos2::new(card.right() - 28.0, cy - 11.0), Align2::RIGHT_CENTER, e.kind.source(), theme::regular(13.0), c::muted());
-                    p.text(Pos2::new(card.right() - 28.0, cy + 11.0), Align2::RIGHT_CENTER, theme::local(e.t).format("%-I:%M %P").to_string(), theme::regular(13.0), c::muted());
+                    p.text(Pos2::new(card.right() - 28.0, cy + 11.0), Align2::RIGHT_CENTER, theme::fmt_time(e.t, false), theme::regular(13.0), c::muted());
+                    // delete this one alert: an × at the row's right end while hovered
+                    if resp.hovered() || ui.rect_contains_pointer(card) {
+                        let xr = Rect::from_center_size(Pos2::new(card.right() - 10.0, cy), Vec2::splat(18.0));
+                        let xresp = ui.interact(xr, ui.id().with(("log-del", e.id)), Sense::click());
+                        let col = if xresp.hovered() { c::bad() } else { c::muted() };
+                        p.text(xr.center(), Align2::CENTER_CENTER, "×", theme::semibold(16.0), col);
+                        if xresp.on_hover_text("Delete this alert").clicked() {
+                            deleted = Some(e.id);
+                        }
+                    }
                 }
                 i += n;
             }
             ui.add_space(24.0);
         });
-        if let Some(id) = clicked {
+        if let Some(id) = deleted {
+            s.store.data.events.retain(|e| e.id != id);
+            s.store.mark_dirty();
+        } else if let Some(id) = clicked {
             if mark_read(&mut s.store.data.events, id) {
                 s.store.mark_dirty();
             }
@@ -244,6 +259,7 @@ fn describe(k: EventKind) -> &'static str {
         EventKind::DnsChanged => "DNS servers changed to",
         EventKind::ProxyChanged => "Proxy settings changed:",
         EventKind::Rdp => "Remote Desktop connection from",
+        EventKind::HostsChanged => "The hosts file changed:",
     }
 }
 
@@ -270,7 +286,7 @@ fn segments(e: &Event) -> Vec<(String, bool)> {
             vec![(lead, false)]
         }
         EventKind::DataCap => vec![("You reached your data plan limit of ".into(), false), (format!("{}.", e.subject), true)],
-        EventKind::DeviceLeft | EventKind::DeviceJoined | EventKind::ArpSpoof | EventKind::DnsChanged | EventKind::ProxyChanged | EventKind::Rdp => {
+        EventKind::DeviceLeft | EventKind::DeviceJoined | EventKind::ArpSpoof | EventKind::DnsChanged | EventKind::ProxyChanged | EventKind::Rdp | EventKind::HostsChanged => {
             vec![(format!("{} ", describe(e.kind)), false), (e.subject.clone(), true)]
         }
     }
@@ -300,6 +316,7 @@ fn badge(p: &egui::Painter, center: Pos2, kind: EventKind) {
         EventKind::ArpSpoof => (c::bad(), Some(Glyph::Shield), None),
         EventKind::DnsChanged | EventKind::ProxyChanged => (c::warn(), Some(Glyph::Globe), None),
         EventKind::Rdp => (c::orange(), Some(Glyph::Computer), None),
+        EventKind::HostsChanged => (c::warn(), Some(Glyph::Shield), None),
     };
     p.circle_filled(center, 20.0, col);
     if let Some(g) = g {
