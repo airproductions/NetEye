@@ -60,13 +60,18 @@ pub struct VantageApp {
 impl VantageApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         theme::setup(&cc.egui_ctx);
-        let ctx = cc.egui_ctx.clone();
-        let monitor = Monitor::start(move || ctx.request_repaint());
-        let quit = Arc::new(AtomicBool::new(false));
         let hwnd = cc.window_handle().ok().and_then(|h| match h.as_raw() {
             RawWindowHandle::Win32(w) => Some(w.hwnd.get()),
             _ => None,
         });
+        let ctx = cc.egui_ctx.clone();
+        // Hidden in the tray or minimized there is nothing to redraw.
+        let monitor = Monitor::start(move || {
+            if hwnd.is_none_or(window_shown) {
+                ctx.request_repaint();
+            }
+        });
+        let quit = Arc::new(AtomicBool::new(false));
         let tray = build_tray(&cc.egui_ctx, hwnd, quit.clone());
         crate::diag::log(&format!("ui ready: tray={} hwnd={}", tray.is_some(), hwnd.is_some()));
         Self {
@@ -465,6 +470,11 @@ fn start_page() -> Page {
         "settings" => Page::Settings,
         _ => Page::Traffic,
     }
+}
+
+fn window_shown(hwnd: isize) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible};
+    unsafe { IsWindowVisible(hwnd as _) != 0 && IsIconic(hwnd as _) == 0 }
 }
 
 fn build_tray(ctx: &egui::Context, hwnd: Option<isize>, quit: Arc<AtomicBool>) -> Option<tray_icon::TrayIcon> {
