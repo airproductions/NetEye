@@ -4,9 +4,11 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
+use super::app_popup;
 use super::motion;
 use super::sort::{self, SortSpec};
 use super::theme::{self, c, Glyph, Icons};
+use super::Action;
 use crate::monitor::{Shared, OTHER_KEY};
 use crate::store::{self, HOUR, MINUTE};
 
@@ -217,7 +219,7 @@ impl TrafficPage {
         out
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons) {
+    pub fn show(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons, actions: &mut Vec<Action>) {
         // decided with the selection that `series` is built from, so the key and the data change in the same frame
         let ease = self.ease.eases(selection_key(self.range, self.selected.as_deref()), ui.input(|i| i.time));
         let series = self.series(s);
@@ -232,14 +234,14 @@ impl TrafficPage {
         ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, c::border()));
         let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left));
         lui.set_clip_rect(left.intersect(ui.clip_rect()));
-        self.app_list(&mut lui, s, icons, &series);
+        self.app_list(&mut lui, s, icons, &series, actions);
         let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink2(Vec2::new(24.0, 14.0))));
         self.chart_area(&mut rui, s, icons, &series);
         let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
         self.strip(&mut fui, s, &series, full.width(), ease);
     }
 
-    fn app_list(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons, series: &Series) {
+    fn app_list(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons, series: &Series, actions: &mut Vec<Action>) {
         let r = ui.max_rect();
         ui.add_space(14.0);
         ui.horizontal(|ui| {
@@ -326,6 +328,8 @@ impl TrafficPage {
                     let p = ui.painter();
                     theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), c::text(), cd - row.left() - 120.0);
                     theme::text_right(p, Pos2::new(cu, row.center().y), &format!("{n} conn{}", if *n == 1 { "" } else { "s" }), theme::regular(13.0), c::muted());
+                    let ir = Rect::from_center_size(Pos2::new(row.left() + 26.0, row.center().y), Vec2::splat(18.0));
+                    app_popup::link(ui, ui.id().with((k, "app-link")), ir, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), cd - row.left() - 120.0, k, actions);
                     continue;
                 }
                 let (key, name, v) = if i == 0 { (None, "All apps".to_string(), all) } else {
@@ -352,6 +356,13 @@ impl TrafficPage {
                 theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), &name, if i == 0 { theme::semibold(14.0) } else { theme::regular(14.0) }, c::text(), cd - row.left() - 120.0);
                 theme::text_right(p, Pos2::new(cd, row.center().y), &theme::bytes(v[0]), theme::regular(13.5), c::text());
                 theme::text_right(p, Pos2::new(cu, row.center().y), &theme::bytes(v[1]), theme::regular(13.5), c::text());
+                // the name and icon also open the app popup; they select the row first
+                if let Some(k) = key.as_deref().filter(|k| *k != OTHER_KEY) {
+                    let font = theme::regular(14.0);
+                    if app_popup::link(ui, ui.id().with((k, "app-link")), ir, Pos2::new(row.left() + 46.0, row.center().y), &name, font, cd - row.left() - 120.0, k, actions) {
+                        self.selected = key.clone();
+                    }
+                }
                 if resp.clicked() {
                     self.selected = key;
                 }

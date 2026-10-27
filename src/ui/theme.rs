@@ -18,7 +18,7 @@ pub mod c {
         ($($f:ident),*) => { $(pub fn $f() -> Color32 { super::super::palette::current().$f })* };
     }
     accessors!(
-        bg, panel, raised, row_alt, hover, selected, border, text, muted, faint, accent, accent2, down, up, good, bad, warn, orange
+        bg, panel, raised, row_alt, hover, selected, border, text, muted, faint, accent, accent2, down, up, good, bad, warn, orange, shadow
     );
 }
 
@@ -207,7 +207,6 @@ pub enum Glyph {
     Bell,
     Radar,
     Wifi,
-    WifiOff,
     Clock,
     Grid,
     Scanner,
@@ -268,13 +267,6 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
                 p.add(Shape::line(arc(pt(10.0, 15.0), r * u, -2.35, -0.79), s));
             }
             p.circle_filled(pt(10.0, 15.0), 1.2 * u, color);
-        }
-        Glyph::WifiOff => {
-            for r in [3.0, 6.0, 9.0] {
-                p.add(Shape::line(arc(pt(10.0, 15.0), r * u, -2.35, -0.79), s));
-            }
-            p.circle_filled(pt(10.0, 15.0), 1.2 * u, color);
-            line(&[(3.0, 3.0), (17.0, 17.0)]);
         }
         Glyph::Clock => {
             p.circle_stroke(pt(10.0, 10.0), 7.5 * u, s);
@@ -576,15 +568,6 @@ pub fn card(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 
 // ---------------------------------------------------------------------------------------------
 // Flat surfaces (the names are kept from the glass look so pages keep compiling)
-
-/// Flat panel fill with a 1px border, no gradient and no shadow.
-pub fn glass_shape(r: Rect, radius: u8) -> Shape {
-    Shape::Rect(egui::epaint::RectShape::new(r, CornerRadius::same(radius), c::panel(), Stroke::new(1.0_f32, c::border()), StrokeKind::Inside))
-}
-
-pub fn glass(p: &Painter, r: Rect, radius: u8) {
-    p.add(glass_shape(r, radius));
-}
 
 /// Frame-based flat card for layouts that need a `Frame`.
 pub fn glass_frame() -> egui::Frame {

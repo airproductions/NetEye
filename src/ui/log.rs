@@ -5,7 +5,9 @@ use std::collections::HashSet;
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::motion;
+use super::app_popup;
 use super::theme::{self, c, Glyph, Icons};
+use super::Action;
 use crate::monitor::Shared;
 use crate::store::{Event, EventKind};
 
@@ -37,7 +39,7 @@ pub struct LogPage {
 }
 
 impl LogPage {
-    pub fn show(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons) {
+    pub fn show(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons, actions: &mut Vec<Action>) {
         let full = ui.max_rect();
         // Remember what was unread when the page opened, then mark everything read.
         let fresh = self.fresh.get_or_insert_with(|| s.store.data.events.iter().filter(|e| !e.read).map(|e| e.id).collect()).clone();
@@ -171,6 +173,8 @@ impl LogPage {
                         let name = s.app_name(app);
                         icons.draw(ui, s, app, Rect::from_center_size(Pos2::new(x + 9.0, cy), Vec2::splat(18.0)), &name);
                         x += 26.0;
+                        let ir = Rect::from_center_size(Pos2::new(x - 17.0, cy), Vec2::splat(18.0));
+                        app_popup::link(ui, ui.id().with(("log-app", e.id)), ir, Pos2::new(x, cy), &name, theme::semibold(14.5), max_x - x, app, actions);
                         x = seg(&p, x, cy, &name, true, max_x);
                     }
                     for (t, bold) in segments(e) {
@@ -208,6 +212,15 @@ fn describe(k: EventKind) -> &'static str {
         EventKind::ProxyChanged => "Proxy settings changed:",
         EventKind::Rdp => "Remote Desktop connection from",
     }
+}
+
+/// One line of text for an event, led by the app's name (used by the app popup's Alerts tab).
+pub(super) fn event_text(e: &Event, app_name: &str) -> String {
+    let mut out = String::from(app_name);
+    for (t, _) in segments(e) {
+        out.push_str(&t);
+    }
+    out
 }
 
 fn segments(e: &Event) -> Vec<(String, bool)> {

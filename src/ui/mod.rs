@@ -1,3 +1,4 @@
+mod app_popup;
 mod firewall;
 mod hardware;
 mod log;
@@ -31,6 +32,10 @@ pub enum Action {
     Scan,
     RelaunchAdmin,
     OpenDataDir,
+    /// Open the app details popup for (app key, click position).
+    OpenApp(String, Pos2),
+    /// Hash this file and open its VirusTotal page.
+    VirusTotal(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -53,6 +58,7 @@ pub struct VantageApp {
     scanner: scanner::ScannerPage,
     hardware: hardware::HardwarePage,
     toast: Option<(String, Instant)>,
+    app_popup: Option<app_popup::AppPopup>,
     page_changed: Instant,
     theme: Option<egui::Theme>,
     theme_fade: (palette::Palette, palette::Palette, Instant),
@@ -89,6 +95,7 @@ impl VantageApp {
             scanner: Default::default(),
             hardware: Default::default(),
             toast: None,
+            app_popup: None,
             page_changed: Instant::now() - std::time::Duration::from_secs(1),
             theme: None,
             theme_fade: (palette::dark(), palette::dark(), Instant::now()),
@@ -98,7 +105,7 @@ impl VantageApp {
         }
     }
 
-    fn run_actions(&mut self, actions: Vec<Action>) {
+    fn run_actions(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
         for a in actions {
             match a {
                 Action::Block(key, dir, block) => self.monitor.set_block(&key, dir, block),
@@ -123,6 +130,8 @@ impl VantageApp {
                         std::process::exit(0);
                     }
                 }
+                Action::OpenApp(key, pos) => self.app_popup = Some(app_popup::AppPopup::new(key, pos)),
+                Action::VirusTotal(path) => app_popup::start_virustotal(self.monitor.clone(), ctx.clone(), path),
                 Action::OpenDataDir => {
                     let dir = self.monitor.lock().store.dir.clone();
                     let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
@@ -229,17 +238,18 @@ impl eframe::App for VantageApp {
                 ui.set_opacity(e);
                 ui.add_space(8.0 * (1.0 - e));
                 match self.page {
-                    Page::Traffic => self.traffic.show(ui, s, &mut self.icons),
+                    Page::Traffic => self.traffic.show(ui, s, &mut self.icons, &mut actions),
                     Page::Firewall => self.firewall.show(ui, s, &mut self.icons, &mut actions),
-                    Page::Log => self.log.show(ui, s, &mut self.icons),
+                    Page::Log => self.log.show(ui, s, &mut self.icons, &mut actions),
                     Page::Scanner => self.scanner.show(ui, s, &mut actions),
                     Page::Hardware => self.hardware.show(ui, s, &mut self.icons),
                     Page::Settings => settings::show(ui, s, &mut actions),
                 }
             });
+            app_popup::show(ctx, &mut self.app_popup, s, &mut self.icons, &mut actions);
         }
         self.draw_toast(ctx);
-        self.run_actions(actions);
+        self.run_actions(ctx, actions);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{self, Align2, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
+use super::app_popup;
 use super::sort::{self, SortSpec};
 use super::theme::{self, c, Glyph, Icons};
 use super::Action;
@@ -362,6 +363,7 @@ impl FirewallPage {
         let ir = Rect::from_center_size(Pos2::new(cols.app + 30.0, cy), Vec2::splat(20.0));
         icons.draw(ui, s, key, ir, name);
         theme::text(&p, Pos2::new(cols.app + 48.0, cy), name, theme::regular(14.0), c::text(), cols.inc - cols.app - 60.0);
+        app_popup::link(ui, ui.id().with((key, "app-link")), ir, Pos2::new(cols.app + 48.0, cy), name, theme::regular(14.0), cols.inc - cols.app - 60.0, key, actions);
 
         let protected = rec.path.as_deref().map(crate::system::is_protected).unwrap_or(false);
         let blockable = rec.path.is_some() && key != SYSTEM_KEY && key != OTHER_KEY && !protected;
