@@ -98,4 +98,4 @@ NetEye bundles the following at build time. Nothing is downloaded at runtime.
 
 ## License
 
-[MIT](LICENSE) © 2026 Idan Rubin
+[MIT](LICENSE) © 2026 NetEye contributors
