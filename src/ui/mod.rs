@@ -160,30 +160,26 @@ impl eframe::App for VantageApp {
             let unread = s.store.data.events.iter().filter(|e| !e.read && e.kind.important()).count();
             theme::set_speed_bits(s.store.data.settings.speed_bits);
 
-            self.rail(ctx, unread);
-            self.header(ctx, s.internet, s.store.data.settings.firewall_enabled, s.admin);
+            egui::TopBottomPanel::top("nav")
+                .exact_height(78.0)
+                .frame(egui::Frame::default().fill(c::panel()).stroke(Stroke::new(1.0_f32, c::border())))
+                .show(ctx, |ui| self.nav(ui, unread, s.admin));
 
             if !s.admin {
                 egui::TopBottomPanel::top("admin")
-                    .exact_height(44.0)
-                    .frame(egui::Frame::default().inner_margin(egui::Margin { left: 20, right: 20, top: 0, bottom: 6 }))
+                    .exact_height(40.0)
+                    .frame(egui::Frame::default().fill(Color32::from_rgb(0x2a, 0x24, 0x14)).inner_margin(egui::Margin::symmetric(18, 0)))
                     .show(ctx, |ui| {
-                        let bar = ui.max_rect();
-                        let w = c::warn();
-                        ui.painter().rect(
-                            bar,
-                            CornerRadius::same(10),
-                            theme::with_alpha(w, 28),
-                            Stroke::new(1.0_f32, theme::with_alpha(w, 60)),
-                            egui::StrokeKind::Inside,
-                        );
                         ui.horizontal_centered(|ui| {
-                            ui.add_space(12.0);
-                            theme::glyph(ui.painter(), Rect::from_center_size(ui.cursor().min + Vec2::new(9.0, 19.0), Vec2::splat(18.0)), Glyph::Lock, c::warn());
+                            theme::glyph(ui.painter(), Rect::from_center_size(ui.cursor().min + Vec2::new(9.0, 20.0), Vec2::splat(18.0)), Glyph::Lock, c::warn());
                             ui.add_space(26.0);
-                            theme::label(ui, "Limited mode: per-app traffic and silent firewall changes need administrator rights.", theme::regular(13.5), c::text());
+                            theme::label(
+                                ui,
+                                "Limited mode: per-app traffic and silent firewall changes need administrator rights.",
+                                theme::regular(13.5),
+                                Color32::from_rgb(0xf3, 0xd9, 0x9b),
+                            );
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.add_space(8.0);
                                 if theme::primary_button(ui, "Restart as administrator").clicked() {
                                     actions.push(Action::RelaunchAdmin);
                                 }
@@ -196,15 +192,15 @@ impl eframe::App for VantageApp {
                 let name = s.app_name(&key);
                 let more = s.asks.len() - 1;
                 egui::TopBottomPanel::top("ask")
-                    .exact_height(50.0)
-                    .frame(egui::Frame::default().inner_margin(egui::Margin { left: 20, right: 20, top: 0, bottom: 6 }))
+                    .exact_height(46.0)
+                    .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(18, 0)))
                     .show(ctx, |ui| {
-                        let bar = ui.max_rect();
+                        let bar = ui.max_rect().expand2(Vec2::new(18.0, 0.0));
                         let a = c::accent();
-                        ui.painter().rect(bar, CornerRadius::same(10), theme::with_alpha(a, 28), Stroke::new(1.0_f32, theme::with_alpha(a, 70)), egui::StrokeKind::Inside);
+                        ui.painter().rect(bar, CornerRadius::ZERO, theme::with_alpha(a, 28), Stroke::new(1.0_f32, theme::with_alpha(a, 70)), egui::StrokeKind::Inside);
                         ui.horizontal_centered(|ui| {
                             ui.add_space(12.0);
-                            let ir = Rect::from_center_size(ui.cursor().min + Vec2::new(10.0, 22.0), Vec2::splat(20.0));
+                            let ir = Rect::from_center_size(ui.cursor().min + Vec2::new(10.0, 23.0), Vec2::splat(20.0));
                             self.icons.draw(ui, s, &key, ir, &name);
                             ui.add_space(28.0);
                             theme::label(ui, format!("{name} wants to connect to the internet."), theme::semibold(13.5), c::text());
@@ -288,94 +284,88 @@ impl VantageApp {
         }
     }
 
-    fn rail(&mut self, ctx: &egui::Context, unread: usize) {
-        const PAGES: [(Page, Glyph, &str); 5] = [
-            (Page::Traffic, Glyph::Traffic, "Traffic"),
-            (Page::Firewall, Glyph::Shield, "Firewall"),
-            (Page::Log, Glyph::Bell, "Activity"),
-            (Page::Scanner, Glyph::Radar, "Scanner"),
-            (Page::Hardware, Glyph::Chip, "Hardware"),
+    fn nav(&mut self, ui: &mut egui::Ui, unread: usize, admin: bool) {
+        let ctx = ui.ctx().clone();
+        let full = ui.max_rect();
+        let p = ui.painter().clone();
+
+        // Brand
+        let logo = Rect::from_min_size(Pos2::new(full.left() + 18.0, full.center().y - 15.0), Vec2::splat(30.0));
+        p.rect_filled(logo, CornerRadius::same(8), c::accent());
+        theme::glyph(&p, logo.shrink(6.0), Glyph::Traffic, Color32::WHITE);
+        p.text(Pos2::new(logo.right() + 10.0, full.center().y - 8.0), Align2::LEFT_CENTER, "Vantage", theme::semibold(17.0), c::text());
+        p.text(
+            Pos2::new(logo.right() + 10.0, full.center().y + 11.0),
+            Align2::LEFT_CENTER,
+            if admin { "FULL MONITORING" } else { "LIMITED MODE" },
+            theme::semibold(10.5),
+            if admin { c::good() } else { c::warn() },
+        );
+
+        const TABS: [(Page, Glyph, &str, &str); 5] = [
+            (Page::Traffic, Glyph::Traffic, "Traffic", "Monitor"),
+            (Page::Firewall, Glyph::Shield, "Firewall", "Rules"),
+            (Page::Log, Glyph::Bell, "Activity", "Log"),
+            (Page::Scanner, Glyph::Radar, "Network", "Scanner"),
+            (Page::Hardware, Glyph::Chip, "Hardware", "Resources"),
         ];
-        egui::SidePanel::left("rail").exact_width(64.0).resizable(false).frame(egui::Frame::default()).show(ctx, |ui| {
-            let full = ui.max_rect();
-            let p = ui.painter().clone();
-            p.rect_filled(full, CornerRadius::ZERO, c::panel());
-            p.line_segment([full.right_top(), full.right_bottom()], Stroke::new(1.0_f32, c::border()));
+        let rects = tab_rects(full, TABS.len());
 
-            let (logo, slots, gear) = rail_slots(full, PAGES.len());
-            p.rect_filled(logo, CornerRadius::same(9), c::accent());
-            theme::glyph(&p, logo.shrink(7.0), Glyph::Traffic, Color32::WHITE);
+        // The highlight glides between tabs; the gear has its own.
+        if let Some(i) = TABS.iter().position(|t| t.0 == self.page) {
+            let x = motion::value(&ctx, ui.id().with("nav_active"), rects[i].left());
+            p.rect_filled(Rect::from_min_size(Pos2::new(x, rects[i].top()), rects[i].size()), CornerRadius::same(10), c::selected());
+        }
 
-            let active_rect = if self.page == Page::Settings {
-                Some(gear)
-            } else {
-                PAGES.iter().position(|(pg, ..)| *pg == self.page).map(|i| slots[i])
-            };
-            if let Some(ar) = active_rect {
-                let y = motion::value(ctx, ui.id().with("rail_active"), ar.top());
-                let hl = Rect::from_min_size(Pos2::new(ar.left(), y), ar.size());
-                theme::glow(&p, hl, 12, 0.8);
-                p.rect_filled(hl, CornerRadius::same(12), c::selected());
-                p.rect_filled(Rect::from_min_size(Pos2::new(full.left(), y + 10.0), Vec2::new(3.0, 20.0)), CornerRadius::same(2), c::accent2());
+        let mut clicked = None;
+        for (i, (page, g, l1, l2)) in TABS.iter().enumerate() {
+            let r = rects[i];
+            let mut resp = ui.interact(r, ui.id().with(*l1), Sense::click());
+            if *page == Page::Log {
+                resp = resp.on_hover_text(unread_label(unread));
             }
+            let active = self.page == *page;
+            let t = motion::hover(ui, resp.id, resp.hovered());
+            if !active && t > 0.0 {
+                p.rect_filled(r, CornerRadius::same(10), theme::lerp_color(Color32::TRANSPARENT, c::hover(), t));
+            }
+            let col = if active { c::accent() } else { c::text() };
+            theme::glyph(&p, Rect::from_center_size(Pos2::new(r.left() + 26.0, r.center().y), Vec2::splat(24.0)), *g, col);
+            p.text(Pos2::new(r.left() + 48.0, r.center().y - 8.0), Align2::LEFT_CENTER, l1, theme::semibold(13.5), col);
+            p.text(Pos2::new(r.left() + 48.0, r.center().y + 9.0), Align2::LEFT_CENTER, l2, theme::semibold(13.5), col);
+            if *page == Page::Log && unread > 0 {
+                let b = Pos2::new(r.left() + 36.0, r.top() + 12.0);
+                let label = if unread > 99 { "99+".to_string() } else { unread.to_string() };
+                let w = 10.0 + 7.0 * label.len() as f32;
+                p.rect_filled(Rect::from_center_size(b, Vec2::new(w.max(18.0), 18.0)), CornerRadius::same(9), c::bad());
+                p.text(b, Align2::CENTER_CENTER, label, theme::semibold(11.0), Color32::WHITE);
+            }
+            if resp.clicked() {
+                clicked = Some(*page);
+            }
+        }
 
-            let mut clicked = None;
-            let item = |ui: &mut egui::Ui, r: Rect, name: &'static str, g: Glyph, active: bool, tip: String| {
-                let resp = ui.interact(r, ui.id().with(name), Sense::click()).on_hover_text(tip);
-                let t = motion::hover(ui, resp.id, resp.hovered());
-                if !active && t > 0.0 {
-                    p.rect_filled(r, CornerRadius::same(12), theme::lerp_color(Color32::TRANSPARENT, c::hover(), t));
-                }
-                let base = if active { c::accent2() } else { c::muted() };
-                theme::glyph(&p, r.shrink(10.0), g, theme::lerp_color(base, c::text(), if active { 0.0 } else { t }));
-                resp.clicked()
-            };
-            for (i, (pg, g, name)) in PAGES.iter().enumerate() {
-                let tip = if *pg == Page::Log { format!("{name}: {}", unread_label(unread)) } else { name.to_string() };
-                if item(ui, slots[i], name, *g, self.page == *pg, tip) {
-                    clicked = Some(*pg);
-                }
-                if *pg == Page::Log && unread > 0 {
-                    let d = Pos2::new(slots[i].right() - 8.0, slots[i].top() + 8.0);
-                    ui.painter().circle_filled(d, 5.5, c::bg());
-                    ui.painter().circle_filled(d, 4.0, c::bad());
-                }
-            }
-            if item(ui, gear, "Settings", Glyph::Gear, self.page == Page::Settings, "Settings".to_string()) {
-                clicked = Some(Page::Settings);
-            }
-            if let Some(pg) = clicked {
-                if pg != self.page {
-                    self.page = pg;
-                    self.page_changed = Instant::now();
-                    ctx.request_repaint();
-                }
-            }
-        });
-    }
+        let gear = Rect::from_center_size(Pos2::new(full.right() - 34.0, full.center().y), Vec2::splat(38.0));
+        let resp = ui.interact(gear, ui.id().with("settings"), Sense::click()).on_hover_text("Settings");
+        let active = self.page == Page::Settings;
+        let t = motion::hover(ui, resp.id, resp.hovered());
+        if active {
+            p.rect_filled(gear, CornerRadius::same(10), c::selected());
+        } else if t > 0.0 {
+            p.rect_filled(gear, CornerRadius::same(10), theme::lerp_color(Color32::TRANSPARENT, c::hover(), t));
+        }
+        theme::glyph(&p, gear.shrink(9.0), Glyph::Gear, if active { c::accent() } else { theme::lerp_color(c::muted(), c::text(), t) });
+        if resp.clicked() {
+            clicked = Some(Page::Settings);
+        }
 
-    fn header(&self, ctx: &egui::Context, internet: Option<bool>, fw_on: bool, admin: bool) {
-        egui::TopBottomPanel::top("header")
-            .exact_height(56.0)
-            .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(24, 0)))
-            .show(ctx, |ui| {
-                ui.horizontal_centered(|ui| {
-                    theme::label(ui, page_title(self.page), theme::bold(20.0), c::text());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let (ig, ic, it) = match internet {
-                            Some(true) => (Glyph::Wifi, c::good(), "Online"),
-                            Some(false) => (Glyph::WifiOff, c::bad(), "Offline"),
-                            None => (Glyph::Wifi, c::muted(), "Checking connection..."),
-                        };
-                        let (fc, ft) = if fw_on { (c::good(), "Firewall is on") } else { (c::faint(), "Firewall is off") };
-                        let (ac, at) = if admin { (c::accent(), "Administrator: full monitoring") } else { (c::warn(), "Limited mode: not running as administrator") };
-                        // right_to_left: first added is rightmost
-                        status_chip(ui, Glyph::Lock, ac, at);
-                        status_chip(ui, Glyph::Shield, fc, ft);
-                        status_chip(ui, ig, ic, it);
-                    });
-                });
-            });
+        if let Some(pg) = clicked {
+            if pg != self.page {
+                self.page = pg;
+                self.page_changed = Instant::now();
+                ctx.request_repaint();
+            }
+        }
     }
 
     fn draw_toast(&mut self, ctx: &egui::Context) {
@@ -468,28 +458,13 @@ fn unread_label(n: usize) -> String {
     }
 }
 
-/// Logo rect, page slots and settings slot for the icon rail occupying `rect`.
-fn rail_slots(rect: Rect, n_top: usize) -> (Rect, Vec<Rect>, Rect) {
-    let x = rect.center().x - 20.0;
-    let logo = Rect::from_center_size(Pos2::new(rect.center().x, rect.top() + 32.0), Vec2::splat(34.0));
-    let slots = (0..n_top).map(|i| Rect::from_min_size(Pos2::new(x, rect.top() + 64.0 + i as f32 * 50.0), Vec2::splat(40.0))).collect();
-    let gear = Rect::from_min_size(Pos2::new(x, rect.bottom() - 14.0 - 40.0), Vec2::splat(40.0));
-    (logo, slots, gear)
-}
-
-fn status_chip(ui: &mut egui::Ui, g: Glyph, col: Color32, tip: &str) {
-    let (r, resp) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
-    let t = motion::hover(ui, resp.id, resp.hovered());
-    ui.painter().rect(
-        r,
-        CornerRadius::same(14),
-        theme::lerp_color(c::panel(), c::hover(), t),
-        Stroke::new(1.0_f32, c::border()),
-        egui::StrokeKind::Inside,
-    );
-    theme::glyph(ui.painter(), r.shrink(6.0), g, col);
-    resp.on_hover_text(tip);
-    ui.add_space(4.0);
+/// The `n` top tabs (132x50, 8px apart), centred in the bar but never left of the brand block.
+fn tab_rects(full: Rect, n: usize) -> Vec<Rect> {
+    const W: f32 = 132.0;
+    const GAP: f32 = 8.0;
+    let total = W * n as f32 + GAP * n.saturating_sub(1) as f32;
+    let x0 = (full.center().x - total / 2.0).max(full.left() + 190.0);
+    (0..n).map(|i| Rect::from_min_size(Pos2::new(x0 + i as f32 * (W + GAP), full.center().y - 25.0), Vec2::new(W, 50.0))).collect()
 }
 
 /// Debug builds can force the theme (VANTAGE_APPEARANCE=dark|light) for screenshots.
@@ -573,21 +548,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rail_slots_fit_min_height() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(64.0, 680.0 - 32.0));
-        let (_logo, slots, settings) = rail_slots(rect, 5);
-        assert!(settings.top() >= slots.last().unwrap().bottom() + 4.0);
-        assert!(settings.bottom() <= rect.bottom());
+    fn tab_rects_centered() {
+        let full = Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 78.0));
+        let rects = tab_rects(full, 5);
+        assert_eq!(rects.len(), 5);
+        assert_eq!(rects[0].left(), (1440.0 - (5.0 * 132.0 + 4.0 * 8.0)) / 2.0);
+        assert_eq!(rects[0].size(), Vec2::new(132.0, 50.0));
+        assert_eq!(rects[0].center().y, 39.0);
+        for w in rects.windows(2) {
+            assert_eq!(w[1].left() - w[0].right(), 8.0);
+        }
     }
 
     #[test]
-    fn rail_slots_count() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(64.0, 648.0));
-        let (_, slots, _) = rail_slots(rect, 5);
-        assert_eq!(slots.len(), 5);
-        assert_eq!(slots[0].size(), Vec2::splat(40.0));
-        assert_eq!(slots[0].top(), 64.0);
-        assert_eq!(slots[1].top() - slots[0].bottom(), 10.0);
+    fn tab_rects_clamp_left() {
+        let full = Rect::from_min_size(Pos2::ZERO, Vec2::new(1100.0, 78.0));
+        let rects = tab_rects(full, 5);
+        assert!(rects[0].left() >= 190.0);
     }
 
     #[test]
