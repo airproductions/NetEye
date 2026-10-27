@@ -41,11 +41,13 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         let width = ui.available_width().min(760.0);
         let margin = ((ui.available_width() - width) / 2.0).max(16.0);
-        ui.add_space(8.0);
+        ui.add_space(28.0);
         ui.horizontal(|ui| {
             ui.add_space(margin);
             ui.vertical(|ui| {
                 ui.set_width(width);
+                theme::label(ui, "Settings", theme::semibold(24.0), c::text());
+                ui.add_space(18.0);
                 let mut changed = false;
                 let st = &mut s.store.data.settings;
 

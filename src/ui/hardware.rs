@@ -1,24 +1,39 @@
 //! Hardware resources: per-app CPU / GPU / memory / disk with stacked 5-minute charts.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::motion;
+use super::sort::{self, SortSpec};
 use super::theme::{self, c, Glyph, Icons};
 use crate::hw::ProcSample;
 use crate::monitor::{Shared, HW_SECONDS};
 
 const ROW_H: f32 = 32.0;
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-enum SortBy {
-    Name,
-    Cpu,
-    Gpu,
-    #[default]
-    Memory,
-    Disk,
+/// Sort columns: 0 Apps, 1 CPU, 2 GPU, 3 Memory, 4 Disk. Biggest memory user first.
+const DEFAULT_SORT: SortSpec = SortSpec { col: 3, desc: true };
+const COLS: u8 = 5;
+
+/// (key, display name, totals, per-process samples)
+type AppRow = (String, String, ProcSample, Vec<(u32, String, ProcSample)>);
+
+fn sort_apps(apps: &mut [AppRow], spec: SortSpec) {
+    sort::apply(
+        apps,
+        spec,
+        |a, b, col| match col {
+            0 => sort::cmp_text(&a.1, &b.1),
+            1 => a.2.cpu.total_cmp(&b.2.cpu),
+            2 => a.2.gpu.total_cmp(&b.2.gpu),
+            3 => a.2.memory.cmp(&b.2.memory),
+            4 => a.2.disk.total_cmp(&b.2.disk),
+            _ => Ordering::Equal,
+        },
+        |r| r.1.as_str(),
+    );
 }
 
 #[derive(Default)]
@@ -26,7 +41,6 @@ pub struct HardwarePage {
     selected: Option<String>,
     expanded: HashSet<String>,
     search: String,
-    sort: SortBy,
 }
 
 fn pct(v: f32) -> String {
@@ -36,15 +50,14 @@ fn pct(v: f32) -> String {
 impl HardwarePage {
     pub fn show(&mut self, ui: &mut egui::Ui, s: &mut Shared, icons: &mut Icons) {
         let full = ui.max_rect();
-        let area = Rect::from_min_max(Pos2::new(full.left() + 16.0, full.top() + 4.0), Pos2::new(full.right() - 16.0, full.bottom() - 16.0));
-        let left_w = 600.0f32.min(area.width() * 0.45);
-        let left = Rect::from_min_max(area.min, Pos2::new(area.left() + left_w, area.bottom()));
-        let right = Rect::from_min_max(Pos2::new(left.right() + 12.0, area.top()), area.max);
-        theme::glass(ui.painter(), left, 14);
-        theme::glass(ui.painter(), right, 14);
-        let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left.shrink2(Vec2::new(6.0, 6.0))));
+        let left_w = 600.0f32.min(full.width() * 0.45);
+        let left = Rect::from_min_max(full.min, Pos2::new(full.left() + left_w, full.bottom()));
+        let right = Rect::from_min_max(Pos2::new(left.right(), full.top()), full.max);
+        ui.painter().rect_filled(left, CornerRadius::ZERO, c::panel());
+        ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, c::border()));
+        let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left));
         self.list(&mut lui, s, icons);
-        let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink2(Vec2::new(24.0, 6.0))));
+        let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink2(Vec2::new(24.0, 0.0))));
         self.charts(&mut rui, s);
     }
 
@@ -62,36 +75,36 @@ impl HardwarePage {
         ui.add_space(8.0);
         let (xc, xg, xm, xd) = (r.right() - 300.0, r.right() - 228.0, r.right() - 96.0, r.right() - 16.0);
         let (hr, _) = ui.allocate_exact_size(Vec2::new(r.width(), 30.0), Sense::hover());
-        let heads = [(SortBy::Name, r.left() + 46.0, "Apps", false), (SortBy::Cpu, xc, "CPU", true), (SortBy::Gpu, xg, "GPU", true), (SortBy::Memory, xm, "Memory", true), (SortBy::Disk, xd, "Disk", true)];
-        for (sort, x, label, right) in heads {
+        let mut spec = s.store.data.settings.sort_for("hardware", DEFAULT_SORT);
+        if spec.col >= COLS {
+            spec = DEFAULT_SORT;
+        }
+        let heads = [(0u8, r.left() + 46.0, "Apps", false), (1, xc, "CPU", true), (2, xg, "GPU", true), (3, xm, "Memory", true), (4, xd, "Disk", true)];
+        let mut sort_changed = false;
+        for (col, x, label, right) in heads {
             let w = if right { 70.0 } else { 120.0 };
-            let hit = if right { Rect::from_min_max(Pos2::new(x - w, hr.top()), Pos2::new(x, hr.bottom())) } else { Rect::from_min_size(Pos2::new(x, hr.top()), Vec2::new(w, hr.height())) };
-            let resp = ui.interact(hit, ui.id().with(label), Sense::click());
-            let col = if self.sort == sort || resp.hovered() { c::text() } else { c::muted() };
-            let font = theme::semibold(12.0);
-            let p = ui.painter();
-            if right { theme::text_right(p, Pos2::new(x, hr.center().y), label, font, col); } else { p.text(Pos2::new(x, hr.center().y), Align2::LEFT_CENTER, label, font, col); }
-            if resp.clicked() {
-                self.sort = sort;
-            }
+            let (hit, align) = if right {
+                (Rect::from_min_max(Pos2::new(x - w, hr.top()), Pos2::new(x, hr.bottom())), Align2::RIGHT_CENTER)
+            } else {
+                (Rect::from_min_size(Pos2::new(x, hr.top()), Vec2::new(w, hr.height())), Align2::LEFT_CENTER)
+            };
+            sort_changed |= sort::header(ui, hit, label, col, &mut spec, right, align);
+        }
+        if sort_changed {
+            s.store.data.settings.set_sort("hardware", spec);
+            s.store.mark_dirty();
         }
         ui.painter().line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::border()));
 
         let q = self.search.to_lowercase();
-        let mut apps: Vec<(String, String, ProcSample, Vec<(u32, String, ProcSample)>)> = s
+        let mut apps: Vec<AppRow> = s
             .hw
             .apps
             .iter()
             .map(|(k, a)| (k.clone(), s.app_name(k), a.total, a.procs.clone()))
             .filter(|(_, n, _, _)| q.is_empty() || n.to_lowercase().contains(&q))
             .collect();
-        match self.sort {
-            SortBy::Name => apps.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase())),
-            SortBy::Cpu => apps.sort_by(|a, b| b.2.cpu.total_cmp(&a.2.cpu)),
-            SortBy::Gpu => apps.sort_by(|a, b| b.2.gpu.total_cmp(&a.2.gpu)),
-            SortBy::Memory => apps.sort_by_key(|a| std::cmp::Reverse(a.2.memory)),
-            SortBy::Disk => apps.sort_by(|a, b| b.2.disk.total_cmp(&a.2.disk)),
-        }
+        sort_apps(&mut apps, spec);
         let sys = s.hw.history.back().copied().unwrap_or_default();
 
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -99,7 +112,7 @@ impl HardwarePage {
             let (row, resp) = ui.allocate_exact_size(Vec2::new(r.width(), ROW_H), Sense::click());
             let p = ui.painter();
             let ht = motion::hover(ui, resp.id, resp.hovered());
-            p.rect_filled(row, CornerRadius::same(8), if self.selected.is_none() { c::selected() } else { theme::lerp_color(Color32::TRANSPARENT, c::hover(), ht) });
+            p.rect_filled(row, CornerRadius::ZERO, if self.selected.is_none() { c::selected() } else { theme::lerp_color(Color32::TRANSPARENT, c::hover(), ht) });
             theme::glyph(p, Rect::from_center_size(Pos2::new(row.left() + 26.0, row.center().y), Vec2::splat(16.0)), Glyph::Grid, c::accent());
             p.text(Pos2::new(row.left() + 46.0, row.center().y), Align2::LEFT_CENTER, "All apps", theme::semibold(14.0), c::text());
             let y = row.center().y;
@@ -118,7 +131,7 @@ impl HardwarePage {
                 let p = ui.painter().clone();
                 let ht = motion::hover(ui, resp.id, resp.hovered());
                 let base = if selected { c::selected() } else if i % 2 == 0 { c::row_alt() } else { Color32::TRANSPARENT };
-                p.rect_filled(row, CornerRadius::same(8), if selected { base } else { theme::lerp_color(base, c::hover(), ht) });
+                p.rect_filled(row, CornerRadius::ZERO, if selected { base } else { theme::lerp_color(base, c::hover(), ht) });
                 let y = row.center().y;
                 let chev = Rect::from_center_size(Pos2::new(row.left() + 8.0 + 4.0, y), Vec2::splat(16.0));
                 let chev_resp = ui.interact(chev.expand(4.0), ui.id().with(("chev", key)), Sense::click());
@@ -143,7 +156,7 @@ impl HardwarePage {
                     for (pid, exe, ps) in procs {
                         let (sr, _) = ui.allocate_exact_size(Vec2::new(r.width(), 26.0), Sense::hover());
                         let p = ui.painter();
-                        p.rect_filled(sr, CornerRadius::same(6), c::row_alt());
+                        p.rect_filled(sr, CornerRadius::ZERO, c::row_alt());
                         let y = sr.center().y;
                         theme::text(p, Pos2::new(sr.left() + 52.0, y), &format!("{exe}  ·  PID {pid}"), theme::regular(12.5), c::muted(), xc - sr.left() - 120.0);
                         theme::text_right(p, Pos2::new(xc, y), &pct(ps.cpu), theme::regular(12.5), c::muted());
@@ -247,5 +260,36 @@ impl HardwarePage {
             p.text(Pos2::new(cx, sr.center().y - 10.0), Align2::CENTER_CENTER, v, theme::semibold(17.0), c::text());
             p.text(Pos2::new(cx, sr.center().y + 14.0), Align2::CENTER_CENTER, *l, theme::regular(13.0), c::muted());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app(name: &str, cpu: f32, memory: u64) -> AppRow {
+        (name.into(), name.into(), ProcSample { cpu, memory, ..Default::default() }, Vec::new())
+    }
+
+    fn names(v: &[AppRow]) -> Vec<&str> {
+        v.iter().map(|a| a.1.as_str()).collect()
+    }
+
+    #[test]
+    fn hardware_default_is_memory_descending() {
+        let mut v = vec![app("b", 1.0, 10), app("a", 9.0, 30), app("c", 5.0, 20)];
+        sort_apps(&mut v, DEFAULT_SORT);
+        assert_eq!(names(&v), ["a", "c", "b"]);
+    }
+
+    #[test]
+    fn hardware_name_and_cpu_columns() {
+        let mut v = vec![app("b", 1.0, 10), app("a", 9.0, 30), app("c", 5.0, 20)];
+        sort_apps(&mut v, SortSpec { col: 0, desc: false });
+        assert_eq!(names(&v), ["a", "b", "c"]);
+        sort_apps(&mut v, SortSpec { col: 1, desc: true });
+        assert_eq!(names(&v), ["a", "c", "b"]);
+        sort_apps(&mut v, SortSpec { col: 1, desc: false });
+        assert_eq!(names(&v), ["b", "c", "a"]);
     }
 }
