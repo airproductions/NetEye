@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::motion;
+use super::sort::{self, SortSpec};
 use super::theme::{self, c, Glyph, Icons};
 use crate::monitor::{Shared, OTHER_KEY};
 use crate::store::{self, HOUR, MINUTE};
@@ -12,10 +13,24 @@ use crate::store::{self, HOUR, MINUTE};
 const RANGES: [&str; 5] = ["5 Minutes", "3 Hours", "24 Hours", "Week", "Month"];
 const RANGE_CODES: [&str; 5] = ["5m", "3h", "24h", "7d", "30d"];
 const ROW_H: f32 = 32.0;
-const GUTTER: f32 = 16.0;
-const GAP: f32 = 10.0;
-const STRIP_H: f32 = 96.0;
-const CARD_R: u8 = 14;
+const STRIP_H: f32 = 92.0;
+/// Biggest download first, which is the list's historical order.
+const DEFAULT_SORT: SortSpec = SortSpec { col: 1, desc: true };
+
+/// Orders (name, down, up) rows: column 0 by name, 1 by download, 2 by upload; ties fall back to name.
+#[cfg(test)]
+fn sort_rows(rows: &mut [(String, u64, u64)], spec: SortSpec) {
+    sort::apply(rows, spec, |a, b, col| cmp_col(col, (&a.0, a.1, a.2), (&b.0, b.1, b.2)), |r| r.0.as_str());
+}
+
+fn cmp_col(col: u8, a: (&str, u64, u64), b: (&str, u64, u64)) -> std::cmp::Ordering {
+    match col {
+        0 => sort::cmp_text(a.0, b.0),
+        1 => a.1.cmp(&b.1),
+        2 => a.2.cmp(&b.2),
+        _ => std::cmp::Ordering::Equal,
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Level {
@@ -192,20 +207,18 @@ impl TrafficPage {
         let ease = self.ease.eases(selection_key(self.range, self.selected.as_deref()), ui.input(|i| i.time));
         let series = self.series(s);
         let full = ui.max_rect();
-        let inner = full.shrink(GUTTER);
-        let body_h = (inner.height() - STRIP_H - GAP).max(0.0);
-        let left_w = 400.0f32.min(inner.width() * 0.34);
-        let left = Rect::from_min_size(inner.min, Vec2::new(left_w, body_h));
-        let right = Rect::from_min_max(Pos2::new(left.right() + GAP, inner.top()), Pos2::new(inner.right(), inner.top() + body_h));
-        let strip = Rect::from_min_max(Pos2::new(inner.left(), inner.bottom() - STRIP_H), inner.max);
+        let left_w = 470.0f32.min(full.width() * 0.4);
+        let body_h = (full.height() - STRIP_H).max(0.0);
+        let left = Rect::from_min_size(full.min, Vec2::new(left_w, body_h));
+        let right = Rect::from_min_max(Pos2::new(left.right(), full.top()), Pos2::new(full.right(), full.top() + body_h));
+        let strip = Rect::from_min_max(Pos2::new(full.left(), full.top() + body_h), full.max);
 
-        for r in [left, right, strip] {
-            theme::glass(ui.painter(), r, CARD_R);
-        }
-        let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left.shrink2(Vec2::new(0.0, 8.0))));
-        lui.set_clip_rect(left.shrink(1.0).intersect(ui.clip_rect()));
+        ui.painter().rect_filled(left, CornerRadius::ZERO, c::panel());
+        ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, c::border()));
+        let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left));
+        lui.set_clip_rect(left.intersect(ui.clip_rect()));
         self.app_list(&mut lui, s, icons, &series);
-        let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink(18.0)));
+        let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink2(Vec2::new(24.0, 14.0))));
         self.chart_area(&mut rui, s, icons, &series);
         let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
         self.strip(&mut fui, s, &series, full.width(), ease);
@@ -239,10 +252,20 @@ impl TrafficPage {
 
         let (cd, cu) = (r.right() - 88.0, r.right() - 14.0);
         let (hr, _) = ui.allocate_exact_size(Vec2::new(r.width(), 28.0), Sense::hover());
-        let p = ui.painter();
-        theme::glyph(p, Rect::from_center_size(Pos2::new(cd - 26.0, hr.center().y), Vec2::splat(13.0)), Glyph::Down, c::down());
-        theme::glyph(p, Rect::from_center_size(Pos2::new(cu - 26.0, hr.center().y), Vec2::splat(13.0)), Glyph::Up, c::up());
-        p.line_segment([Pos2::new(r.left(), hr.bottom()), Pos2::new(r.right(), hr.bottom())], Stroke::new(1.0_f32, c::border()));
+        let mut spec = s.store.data.settings.sort_for("traffic", DEFAULT_SORT);
+        if spec.col > 2 {
+            spec = DEFAULT_SORT;
+        }
+        let hh = |x0: f32, x1: f32| Rect::from_min_max(Pos2::new(x0, hr.top()), Pos2::new(x1, hr.bottom()));
+        let mut changed = false;
+        changed |= sort::header(ui, hh(r.left() + 46.0, cd - 100.0), "App", 0, &mut spec, false, Align2::LEFT_CENTER);
+        changed |= sort::header(ui, hh(cd - 70.0, cd), "↓", 1, &mut spec, true, Align2::RIGHT_CENTER);
+        changed |= sort::header(ui, hh(cu - 70.0, cu), "↑", 2, &mut spec, true, Align2::RIGHT_CENTER);
+        if changed {
+            s.store.data.settings.set_sort("traffic", spec);
+            s.store.mark_dirty();
+        }
+        ui.painter().line_segment([Pos2::new(r.left(), hr.bottom()), Pos2::new(r.right(), hr.bottom())], Stroke::new(1.0_f32, c::border()));
 
         let mut apps: Vec<(String, String, [u64; 2])> = series
             .app_totals
@@ -252,7 +275,7 @@ impl TrafficPage {
             .collect();
         let q = self.search.to_lowercase();
         apps.retain(|(_, n, _)| q.is_empty() || n.to_lowercase().contains(&q));
-        apps.sort_by_key(|(_, _, v)| std::cmp::Reverse(v[0] + v[1]));
+        sort::apply(&mut apps, spec, |a, b, col| cmp_col(col, (&a.1, a.2[0], a.2[1]), (&b.1, b.2[0], b.2[1])), |r| r.1.as_str());
         // Without admin there are no per-app byte counts; list connected apps by connection count.
         let mut connected: Vec<(String, String, usize)> = Vec::new();
         if !s.admin {
@@ -263,7 +286,8 @@ impl TrafficPage {
                     connected.push((k.clone(), name, n));
                 }
             }
-            connected.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+            // no byte counts here: the connection count stands in for both number columns
+            sort::apply(&mut connected, spec, |a, b, col| cmp_col(col, (&a.1, a.2 as u64, a.2 as u64), (&b.1, b.2 as u64, b.2 as u64)), |r| r.1.as_str());
         }
         let all: [u64; 2] = [series.down.iter().sum::<f64>() as u64, series.up.iter().sum::<f64>() as u64];
         let all = if self.selected.is_some() {
@@ -568,6 +592,8 @@ impl TrafficPage {
         let ctx = ui.ctx().clone();
         let id = ui.id().with("strip");
         let cy = r.center().y;
+        ui.painter().rect_filled(r, CornerRadius::ZERO, c::panel());
+        ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0_f32, c::border()));
 
         // live rate follows the selected app
         let cur = s
@@ -665,7 +691,7 @@ impl TrafficPage {
 
         // Internet / Local network rows
         let show_counts = strip_shows_counts(page_w);
-        let counts_w = if show_counts { 210.0 } else { 0.0 };
+        let counts_w = if show_counts { 210.0 } else { 100.0 };
         let lan = series.lan;
         let wan = [total[0].saturating_sub(lan[0]), total[1].saturating_sub(lan[1])];
         let rows_right = r.right() - 22.0 - counts_w;
@@ -712,11 +738,22 @@ impl TrafficPage {
             }
         }
 
+        // online status at the strip's right end, with the app and connection counts under it when there is room
+        divider(r.right() - counts_w - 12.0);
+        let conns: usize = s.apps_live.values().map(|a| a.in_conns + a.out_conns).sum();
+        let active = s.apps_live.values().filter(|a| a.in_conns + a.out_conns > 0).count();
+        let status = match s.internet {
+            Some(true) => ("Online", c::good()),
+            Some(false) => ("Offline", c::bad()),
+            None => ("Checking…", c::muted()),
+        };
+        let rx = r.right() - 22.0;
+        let sy = if show_counts { cy - 12.0 } else { cy };
+        let sw = p.layout_no_wrap(status.0.into(), theme::semibold(14.0), c::text()).size().x;
+        p.circle_filled(Pos2::new(rx - sw - 12.0, sy), 4.5, status.1);
+        p.text(Pos2::new(rx, sy), Align2::RIGHT_CENTER, status.0, theme::semibold(14.0), c::text());
         if show_counts {
-            divider(r.right() - counts_w - 12.0);
-            let conns: usize = s.apps_live.values().map(|a| a.in_conns + a.out_conns).sum();
-            let active = s.apps_live.values().filter(|a| a.in_conns + a.out_conns > 0).count();
-            p.text(Pos2::new(r.right() - 22.0, cy), Align2::RIGHT_CENTER, format!("{active} apps · {conns} connections"), theme::regular(13.0), c::muted());
+            p.text(Pos2::new(rx, cy + 12.0), Align2::RIGHT_CENTER, format!("{active} apps · {conns} connections"), theme::regular(13.0), c::muted());
         }
     }
 }
@@ -724,6 +761,7 @@ impl TrafficPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::sort::SortSpec;
 
     #[test]
     fn gauge_no_cap_splits_ratio() {
@@ -793,5 +831,24 @@ mod tests {
     fn strip_drops_counts_when_narrow() {
         assert!(!strip_shows_counts(1036.0));
         assert!(strip_shows_counts(1300.0));
+    }
+
+    fn rows() -> Vec<(String, u64, u64)> {
+        vec![("b".into(), 10, 1), ("A".into(), 5, 9), ("c".into(), 10, 3)]
+    }
+
+    fn names(r: &[(String, u64, u64)]) -> Vec<&str> {
+        r.iter().map(|x| x.0.as_str()).collect()
+    }
+
+    #[test]
+    fn traffic_rows_sort() {
+        let mut r = rows();
+        sort_rows(&mut r, SortSpec { col: 1, desc: true });
+        assert_eq!(names(&r), ["b", "c", "A"]);
+        sort_rows(&mut r, SortSpec { col: 0, desc: false });
+        assert_eq!(names(&r), ["A", "b", "c"]);
+        sort_rows(&mut r, SortSpec { col: 2, desc: true });
+        assert_eq!(names(&r), ["A", "c", "b"]);
     }
 }
