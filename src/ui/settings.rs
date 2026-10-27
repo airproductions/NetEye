@@ -37,6 +37,20 @@ fn toggle_row(ui: &mut egui::Ui, title: &str, detail: &str, value: &mut bool) ->
     changed
 }
 
+fn plan_focus_id() -> egui::Id {
+    egui::Id::new("settings-focus-plan")
+}
+
+/// Asks the next Settings frame to scroll the data plan section into view, once.
+pub fn focus_plan(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(plan_focus_id(), true));
+}
+
+/// Consumes the one-shot request from `focus_plan`.
+fn take_plan_focus(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| d.remove_temp::<bool>(plan_focus_id())).unwrap_or(false)
+}
+
 pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         let width = ui.available_width().min(760.0);
@@ -148,7 +162,10 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
                 });
                 ui.add_space(20.0);
 
-                theme::label(ui, "DATA PLAN", theme::semibold(12.0), c::muted());
+                let plan = theme::label(ui, "DATA PLAN", theme::semibold(12.0), c::muted());
+                if take_plan_focus(ui.ctx()) {
+                    plan.scroll_to_me(Some(egui::Align::TOP));
+                }
                 ui.add_space(6.0);
                 theme::card(ui, |ui| {
                     ui.set_width(width - 32.0);
@@ -298,4 +315,18 @@ pub fn show(ui: &mut egui::Ui, s: &mut Shared, actions: &mut Vec<Action>) {
             });
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_focus_is_one_shot() {
+        let ctx = egui::Context::default();
+        assert!(!take_plan_focus(&ctx));
+        focus_plan(&ctx);
+        assert!(take_plan_focus(&ctx));
+        assert!(!take_plan_focus(&ctx));
+    }
 }
