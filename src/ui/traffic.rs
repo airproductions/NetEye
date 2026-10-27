@@ -47,8 +47,8 @@ fn shown_spec(spec: SortSpec, dir: DirF) -> SortSpec {
 
 /// (row key, display name, [down, up])
 type AppRow = (String, String, [u64; 2]);
-/// (app key, display name, connection count)
-type ConnRow = (String, String, usize);
+/// (app key, display name, connection count, current [down, up] speed)
+type ConnRow = (String, String, usize, [u64; 2]);
 
 /// Columns: 0 name, 1 download, 2 upload; NATURAL (and anything else) is down + up.
 fn order_apps(rows: &mut [AppRow], spec: SortSpec) {
@@ -65,9 +65,20 @@ fn order_apps(rows: &mut [AppRow], spec: SortSpec) {
     );
 }
 
-/// "Connected now" has no byte counts: name for column 0, connection count otherwise.
-fn order_connected(rows: &mut [ConnRow], spec: SortSpec) {
-    sort::apply(rows, spec, |a, b, col| if col == 0 { sort::cmp_text(&a.1, &b.1) } else { a.2.cmp(&b.2) }, |r| r.1.as_str());
+/// "Connected now": name for column 0. In administrator mode the download and upload columns
+/// sort by the speed they show; otherwise (and for NATURAL) by connection count.
+fn order_connected(rows: &mut [ConnRow], spec: SortSpec, admin: bool) {
+    sort::apply(
+        rows,
+        spec,
+        |a, b, col| match col {
+            0 => sort::cmp_text(&a.1, &b.1),
+            1 if admin => a.3[0].cmp(&b.3[0]),
+            2 if admin => a.3[1].cmp(&b.3[1]),
+            _ => a.2.cmp(&b.2),
+        },
+        |r| r.1.as_str(),
+    );
 }
 
 /// Group by, Network and Direction as shown: without administrator rights the admin-only saved
@@ -582,10 +593,10 @@ impl TrafficPage {
                 let n = l.in_conns + l.out_conns;
                 let name = s.app_name(k);
                 if n > 0 && k != OTHER_KEY && (q.is_empty() || name.to_lowercase().contains(&q)) {
-                    connected.push((k.clone(), name, n));
+                    connected.push((k.clone(), name, n, l.rate));
                 }
             }
-            order_connected(&mut connected, spec);
+            order_connected(&mut connected, spec, s.admin);
         }
         // the pinned row is every list row added up, whatever is selected
         let all = agg.rows.iter().fold([0u64, 0u64], |a, r| [a[0] + r.down, a[1] + r.up]);
@@ -600,7 +611,7 @@ impl TrafficPage {
                         ui.painter().text(Pos2::new(row.left() + 16.0, row.center().y + 4.0), Align2::LEFT_CENTER, "CONNECTED NOW", theme::semibold(11.5), c::muted());
                         continue;
                     }
-                    let (k, name, n) = &connected[j - 1];
+                    let (k, name, n, rate) = &connected[j - 1];
                     if resp.hovered() {
                         ui.painter().rect_filled(row, CornerRadius::ZERO, c::hover());
                     }
@@ -608,8 +619,7 @@ impl TrafficPage {
                     icons.draw(ui, s, k, ir, name);
                     let p = ui.painter();
                     theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), c::text(), text_w);
-                    let rate = s.apps_live.get(k).map_or([0, 0], |l| l.rate);
-                    let cells = connected_cells(rate, s.admin);
+                    let cells = connected_cells(*rate, s.admin);
                     for (ci, (col, _)) in cols.iter().enumerate() {
                         theme::text_right(p, Pos2::new(col_x(ci), row.center().y), &cells[usize::from(*col) - 1], theme::regular(13.0), c::muted());
                     }
@@ -1432,12 +1442,28 @@ mod tests {
 
     #[test]
     fn traffic_connected_order() {
-        let mk = |n: &str, c: usize| (format!("{n}.exe"), n.to_string(), c);
+        let mk = |n: &str, c: usize| (format!("{n}.exe"), n.to_string(), c, [0, 0]);
         let mut r = vec![mk("b", 2), mk("a", 2), mk("z", 5)];
-        order_connected(&mut r, NATURAL);
+        order_connected(&mut r, NATURAL, false);
         assert_eq!(r.iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), ["z", "a", "b"]);
-        order_connected(&mut r, SortSpec { col: 0, desc: false });
+        order_connected(&mut r, SortSpec { col: 0, desc: false }, false);
         assert_eq!(r.iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), ["a", "b", "z"]);
+    }
+
+    #[test]
+    fn traffic_connected_admin_sorts_by_speed() {
+        // many connections but slow vs. few connections but fast
+        let mut r = vec![("a.exe".to_string(), "a".to_string(), 9, [10, 900]), ("b.exe".to_string(), "b".to_string(), 1, [500, 5])];
+        let order = |r: &[ConnRow]| r.iter().map(|x| x.1.clone()).collect::<Vec<_>>();
+        order_connected(&mut r, SortSpec { col: 1, desc: true }, true);
+        assert_eq!(order(&r), ["b", "a"]);
+        order_connected(&mut r, SortSpec { col: 2, desc: true }, true);
+        assert_eq!(order(&r), ["a", "b"]);
+        order_connected(&mut r, SortSpec { col: 1, desc: false }, true);
+        assert_eq!(order(&r), ["a", "b"]);
+        // limited mode shows dashes, so the number columns keep sorting by connection count
+        order_connected(&mut r, SortSpec { col: 1, desc: true }, false);
+        assert_eq!(order(&r), ["a", "b"]);
     }
 
     #[test]

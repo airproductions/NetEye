@@ -289,7 +289,7 @@ impl Bucket {
 
     /// Every flow as (app, flow). Entries whose indices fall outside `strs` (a damaged file)
     /// are skipped, so their bytes show up as the app's unclassified residual instead.
-    #[allow(dead_code)] // consumed by Task 6; removed in Task 11
+    #[cfg(test)]
     pub fn flows_of(&self) -> impl Iterator<Item = (&str, Flow)> + '_ {
         let s = |i: u64| usize::try_from(i).ok().and_then(|i| self.strs.get(i));
         self.flows.iter().flat_map(move |(app, list)| {

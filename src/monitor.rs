@@ -94,7 +94,6 @@ pub struct LiveSample {
     pub up: u64,
     pub apps: Vec<(String, [u64; 2])>,
     /// This second's flows per app; filled for the newest samples only (Task 5).
-    #[allow(dead_code)] // consumed by Task 6; removed in Task 11
     pub flows: Vec<(String, store::Flow)>,
 }
 

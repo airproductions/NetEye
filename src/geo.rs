@@ -3,7 +3,6 @@
 //! The DB-IP Lite country MMDB ships unmodified in `assets/geo/` and is compiled into the binary;
 //! nothing is fetched at runtime. Only `country.iso_code` is read. A database that fails to load
 //! makes every public address resolve to [`UNKNOWN`] instead of crashing.
-#![allow(dead_code)] // consumed by Task 5 and Task 6; removed in Task 11
 
 use std::net::IpAddr;
 use std::sync::LazyLock;
@@ -49,6 +48,7 @@ pub fn name(code: &str) -> String {
 }
 
 /// Whether the bundled database opened successfully.
+#[cfg(test)]
 pub fn loaded() -> bool {
     GEO.is_some()
 }

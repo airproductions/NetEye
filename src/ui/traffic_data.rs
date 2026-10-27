@@ -9,7 +9,6 @@
 //! (`apps[k] − Σ flows[k]`, the bytes recorded without flows), which is "Not classified" as a
 //! type, a country and a host. Rows, columns and totals all add the same atoms, so they
 //! reconcile by construction.
-#![allow(dead_code)] // consumed by Task 7; removed in Task 11
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};

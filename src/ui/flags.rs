@@ -2,7 +2,6 @@
 //!
 //! The flags come from one atlas PNG that `tools/flag-atlas` rasterised offline from
 //! lipis/flag-icons (MIT); `assets/flags/README.md` records the source and layout.
-#![allow(dead_code)] // consumed by Task 7; removed in Task 11
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
