@@ -10,6 +10,7 @@ use eframe::egui::{
 
 use super::motion;
 use crate::monitor::Shared;
+use crate::ports;
 
 pub mod c {
     //! Colour accessors for the active palette (see `palette`).
@@ -230,6 +231,33 @@ pub enum Glyph {
     Refresh,
     Check,
     Lock,
+    Calendar,
+    BellPlus,
+    TypeWeb,
+    TypeNames,
+    TypeFiles,
+    TypeMail,
+    TypeRemote,
+    TypeMedia,
+    TypeGames,
+    TypeSystem,
+    TypeOther,
+}
+
+/// Glyph for a traffic-type category (Traffic type rows).
+pub fn cat_glyph(c: ports::Cat) -> Glyph {
+    use ports::Cat;
+    match c {
+        Cat::Web => Glyph::TypeWeb,
+        Cat::Names => Glyph::TypeNames,
+        Cat::Files => Glyph::TypeFiles,
+        Cat::Mail => Glyph::TypeMail,
+        Cat::Remote => Glyph::TypeRemote,
+        Cat::Media => Glyph::TypeMedia,
+        Cat::Games => Glyph::TypeGames,
+        Cat::System => Glyph::TypeSystem,
+        Cat::Other => Glyph::TypeOther,
+    }
 }
 
 pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
@@ -376,6 +404,74 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
             p.rect_stroke(Rect::from_min_max(pt(4.5, 9.0), pt(15.5, 17.5)), CornerRadius::same(2), s, StrokeKind::Middle);
             p.add(Shape::line(arc(pt(10.0, 9.0), 3.6 * u, -3.1416, 0.0), s));
         }
+        Glyph::Calendar => {
+            p.rect_stroke(Rect::from_min_max(pt(3.0, 4.5), pt(17.0, 17.0)), CornerRadius::same(2), s, StrokeKind::Middle);
+            line(&[(3.0, 8.5), (17.0, 8.5)]);
+            line(&[(7.0, 2.5), (7.0, 6.0)]);
+            line(&[(13.0, 2.5), (13.0, 6.0)]);
+            for (x, y) in [(7.0, 12.0), (10.0, 12.0), (13.0, 12.0), (7.0, 14.5), (10.0, 14.5)] {
+                p.circle_filled(pt(x, y), 0.8 * u, color);
+            }
+        }
+        Glyph::BellPlus => {
+            // the bell, shifted left to make room for the plus
+            line(&[(2.5, 15.0), (3.5, 13.5), (3.5, 10.0)]);
+            p.add(Shape::line(arc(pt(8.0, 10.0), 4.5 * u, 3.1416, 6.2832), s));
+            line(&[(12.5, 10.0), (12.5, 13.5), (13.5, 15.0), (2.5, 15.0)]);
+            p.add(Shape::line(arc(pt(8.0, 15.0), 1.8 * u, 0.0, 3.1416), s));
+            line(&[(13.5, 4.5), (18.5, 4.5)]);
+            line(&[(16.0, 2.0), (16.0, 7.0)]);
+        }
+        Glyph::TypeWeb => {
+            // a browser window
+            p.rect_stroke(Rect::from_min_max(pt(2.5, 4.0), pt(17.5, 16.0)), CornerRadius::same(2), s, StrokeKind::Middle);
+            line(&[(2.5, 7.5), (17.5, 7.5)]);
+            p.circle_filled(pt(5.0, 5.8), 0.7 * u, color);
+            p.circle_filled(pt(7.2, 5.8), 0.7 * u, color);
+        }
+        Glyph::TypeNames => {
+            // a signpost
+            line(&[(9.0, 2.5), (9.0, 17.5)]);
+            line(&[(4.0, 4.5), (14.5, 4.5), (17.0, 7.0), (14.5, 9.5), (4.0, 9.5), (4.0, 4.5)]);
+            line(&[(6.0, 17.5), (12.0, 17.5)]);
+        }
+        Glyph::TypeFiles => line(&[(2.5, 5.0), (7.5, 5.0), (9.5, 7.5), (17.5, 7.5), (17.5, 15.5), (2.5, 15.5), (2.5, 5.0)]),
+        Glyph::TypeMail => {
+            p.rect_stroke(Rect::from_min_max(pt(2.5, 5.0), pt(17.5, 15.0)), CornerRadius::same(2), s, StrokeKind::Middle);
+            line(&[(3.0, 5.8), (10.0, 11.0), (17.0, 5.8)]);
+        }
+        Glyph::TypeRemote => {
+            // a screen with an arrow reaching into it
+            p.rect_stroke(Rect::from_min_max(pt(2.5, 3.5), pt(17.5, 13.5)), CornerRadius::same(2), s, StrokeKind::Middle);
+            line(&[(10.0, 13.5), (10.0, 16.5)]);
+            line(&[(6.0, 16.5), (14.0, 16.5)]);
+            line(&[(6.5, 10.5), (12.5, 6.5)]);
+            line(&[(9.5, 6.5), (12.5, 6.5), (12.5, 9.5)]);
+        }
+        Glyph::TypeMedia => {
+            p.circle_stroke(pt(10.0, 10.0), 7.5 * u, s);
+            line(&[(8.3, 6.6), (13.8, 10.0), (8.3, 13.4), (8.3, 6.6)]);
+        }
+        Glyph::TypeGames => {
+            // a game pad
+            p.rect_stroke(Rect::from_min_max(pt(2.0, 6.0), pt(18.0, 15.0)), CornerRadius::same((3.5 * u).round() as u8), s, StrokeKind::Middle);
+            line(&[(4.8, 10.5), (8.8, 10.5)]);
+            line(&[(6.8, 8.5), (6.8, 12.5)]);
+            p.circle_filled(pt(13.0, 9.5), 0.9 * u, color);
+            p.circle_filled(pt(15.0, 11.5), 0.9 * u, color);
+        }
+        Glyph::TypeSystem => {
+            // sliders
+            for (y, knob) in [(5.0, 7.0), (10.0, 13.0), (15.0, 9.0)] {
+                line(&[(3.0, y), (17.0, y)]);
+                p.circle_filled(pt(knob, y), 1.8 * u, color);
+            }
+        }
+        Glyph::TypeOther => {
+            for x in [5.0, 10.0, 15.0] {
+                p.circle_filled(pt(x, 10.0), 1.4 * u, color);
+            }
+        }
     }
 }
 
@@ -514,6 +610,94 @@ pub fn dropdown(ui: &mut Ui, id: &str, options: &[&str], selected: &mut usize) -
             }
         });
     before != *selected
+}
+
+/// One entry of a [`menu_items`] popup.
+#[derive(Clone, Copy)]
+pub struct MenuItem<'a> {
+    pub label: &'a str,
+    /// Drawn after the label.
+    pub icon: Option<Glyph>,
+    /// A thin line above this entry, to start a new section.
+    pub divider_before: bool,
+    pub disabled: bool,
+}
+
+impl<'a> MenuItem<'a> {
+    pub fn new(label: &'a str) -> Self {
+        Self { label, icon: None, divider_before: false, disabled: false }
+    }
+}
+
+/// Compact header button (`label` and a chevron) that opens a popup of plain text entries.
+/// See [`menu_items`].
+pub fn menu(ui: &mut Ui, id: &str, label: &str, items: &[&str], selected: usize, disabled: &[bool], disabled_tip: &str) -> Option<usize> {
+    let items: Vec<MenuItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, l)| MenuItem { disabled: disabled.get(i).copied().unwrap_or(false), ..MenuItem::new(l) })
+        .collect();
+    menu_items(ui, id, label, &items, selected, disabled_tip)
+}
+
+/// Compact header button that opens a popup menu (egui's popup, not a ComboBox). The `selected`
+/// entry gets a check mark; disabled entries are greyed out and show `disabled_tip`. Returns the
+/// picked index.
+pub fn menu_items(ui: &mut Ui, id: &str, label: &str, items: &[MenuItem], selected: usize, disabled_tip: &str) -> Option<usize> {
+    let font = semibold(13.0);
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font, c::text());
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 40.0, 30.0), Sense::click());
+    let popup = egui::Id::new(("menu", id));
+    let open = ui.memory(|m| m.is_popup_open(popup));
+    let t = motion::hover(ui, resp.id, resp.hovered());
+    let fill = if open { c::hover() } else { lerp_color(c::raised(), c::hover(), t) };
+    ui.painter().rect_filled(r, CornerRadius::same(8), fill);
+    ui.painter().galley(Pos2::new(r.left() + 12.0, r.center().y - galley.size().y / 2.0), galley, c::text());
+    glyph(ui.painter(), Rect::from_center_size(Pos2::new(r.right() - 15.0, r.center().y + 0.5), Vec2::splat(12.0)), Glyph::ChevronDown, c::muted());
+    if resp.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup));
+    }
+    let mut picked = None;
+    egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let row_font = regular(13.5);
+        let text_w = items
+            .iter()
+            .map(|it| ui.painter().layout_no_wrap(it.label.to_string(), row_font.clone(), c::text()).size().x + if it.icon.is_some() { 24.0 } else { 0.0 })
+            .fold(0.0, f32::max);
+        let width = (text_w + 48.0).max(r.width());
+        ui.set_min_width(width);
+        for (i, it) in items.iter().enumerate() {
+            if it.divider_before && i > 0 {
+                let (dr, _) = ui.allocate_exact_size(Vec2::new(width, 9.0), Sense::hover());
+                ui.painter().line_segment([Pos2::new(dr.left() + 6.0, dr.center().y), Pos2::new(dr.right() - 6.0, dr.center().y)], Stroke::new(1.0_f32, c::border()));
+            }
+            let (row, rresp) = ui.allocate_exact_size(Vec2::new(width, 28.0), if it.disabled { Sense::hover() } else { Sense::click() });
+            let p = ui.painter();
+            if !it.disabled && rresp.hovered() {
+                p.rect_filled(row, CornerRadius::same(6), c::hover());
+            }
+            let col = if it.disabled { c::faint() } else { c::text() };
+            if i == selected {
+                // painted rather than `Glyph::Check`, which stays unused
+                let (x, y) = (row.left() + 9.0, row.center().y);
+                p.add(Shape::line(vec![Pos2::new(x, y), Pos2::new(x + 3.5, y + 3.5), Pos2::new(x + 10.0, y - 4.0)], Stroke::new(1.6_f32, c::accent())));
+            }
+            let tr = p.text(Pos2::new(row.left() + 28.0, row.center().y), Align2::LEFT_CENTER, it.label, row_font.clone(), col);
+            if let Some(g) = it.icon {
+                glyph(p, Rect::from_center_size(Pos2::new(tr.right() + 14.0, row.center().y), Vec2::splat(15.0)), g, if it.disabled { c::faint() } else { c::muted() });
+            }
+            if it.disabled {
+                if !disabled_tip.is_empty() {
+                    rresp.on_hover_text(disabled_tip);
+                }
+            } else if rresp.clicked() {
+                picked = Some(i);
+                ui.memory_mut(|m| m.close_popup());
+            }
+        }
+    });
+    picked
 }
 
 pub fn search_box(ui: &mut Ui, value: &mut String, width: f32, hint: &str) -> Response {

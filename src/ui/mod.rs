@@ -42,6 +42,8 @@ pub enum Action {
     OpenApp(String, Pos2),
     /// Hash this file and open its VirusTotal page.
     VirusTotal(String),
+    /// Switch to the Settings page (the strip's data-alert bell).
+    OpenSettings,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -155,6 +157,13 @@ impl VantageApp {
                 }
                 Action::OpenApp(key, pos) => self.app_popup = Some(app_popup::AppPopup::new(key, pos)),
                 Action::VirusTotal(path) => app_popup::start_virustotal(self.monitor.clone(), ctx.clone(), path),
+                Action::OpenSettings => {
+                    if self.page != Page::Settings {
+                        self.page = Page::Settings;
+                        self.page_changed = Instant::now();
+                        ctx.request_repaint();
+                    }
+                }
                 Action::OpenDataDir => {
                     let dir = self.monitor.lock().store.dir.clone();
                     let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
