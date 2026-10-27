@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::motion;
 use super::theme::{self, c, Glyph, Icons};
@@ -49,10 +49,10 @@ impl LogPage {
         }
 
         let mut clear = false;
-        let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 64.0), Sense::hover());
-        let card = bar.shrink2(Vec2::new(16.0, 4.0));
-        theme::glass(ui.painter(), card, 14);
-        let mut b = ui.new_child(egui::UiBuilder::new().max_rect(card.shrink2(Vec2::new(16.0, 8.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 72.0), Sense::hover());
+        ui.painter().rect_filled(bar, CornerRadius::ZERO, c::panel());
+        ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0_f32, c::border()));
+        let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(24.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
         // Important, everything, then one entry per alert type, each with its count.
         let all = &s.store.data.events;
         let types = TYPES;
@@ -147,18 +147,18 @@ impl LogPage {
                     day.format("%A, %-d %B %Y").to_string()
                 };
                 let (r, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
-                ui.painter().text(Pos2::new(r.left() + 28.0, r.center().y), Align2::LEFT_CENTER, label, theme::semibold(15.5), c::text());
-                let pad = 6.0;
-                let (gr, _) = ui.allocate_exact_size(Vec2::new(width, n as f32 * ROW_H + pad * 2.0), Sense::hover());
-                let group = gr.shrink2(Vec2::new(16.0, 0.0));
-                theme::glass(ui.painter(), group, 14);
+                ui.painter().text(Pos2::new(r.left() + 48.0, r.center().y), Align2::LEFT_CENTER, label, theme::semibold(15.5), c::text());
+                let (gr, _) = ui.allocate_exact_size(Vec2::new(width, n as f32 * ROW_H), Sense::hover());
+                let group = gr.shrink2(Vec2::new(40.0, 0.0));
                 for (k, e) in events[i..i + n].iter().enumerate() {
-                    let card = Rect::from_min_size(Pos2::new(group.left() + pad, group.top() + pad + k as f32 * ROW_H), Vec2::new(group.width() - pad * 2.0, ROW_H));
+                    let card = Rect::from_min_size(Pos2::new(group.left(), group.top() + k as f32 * ROW_H), Vec2::new(group.width(), ROW_H));
                     let resp = ui.interact(card, ui.id().with(("log-row", e.id)), Sense::hover());
                     let t = motion::hover(ui, resp.id, resp.hovered());
                     let p = ui.painter().clone();
-                    let base = if k % 2 == 1 { c::row_alt() } else { Color32::TRANSPARENT };
-                    p.rect_filled(card, CornerRadius::same(10), theme::lerp_color(base, c::hover(), t));
+                    p.rect_filled(card, CornerRadius::ZERO, theme::lerp_color(c::panel(), c::hover(), t));
+                    if k > 0 {
+                        p.line_segment([Pos2::new(card.left() + 20.0, card.top()), Pos2::new(card.right() - 20.0, card.top())], Stroke::new(1.0_f32, c::border()));
+                    }
                     let cy = card.center().y;
                     badge(&p, Pos2::new(card.left() + 44.0, cy), e.kind);
                     if fresh.contains(&e.id) {
