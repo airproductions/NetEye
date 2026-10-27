@@ -16,6 +16,7 @@ dns-lookup = "2"
 notify-rust = "4"
 tray-icon = "0.19"
 raw-window-handle = "0.6"
+maxminddb = { version = "0.32", default-features = false }
 
 [dependencies.windows-sys]
 version = "0.59"
