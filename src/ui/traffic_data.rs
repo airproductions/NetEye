@@ -456,6 +456,23 @@ impl<'a> Interner<'a> {
     }
 }
 
+/// How many entries ahead the bucket readers prefetch.
+const AHEAD: usize = 6;
+
+/// Hints the CPU to start loading `p`. Each stored string has its own heap allocation, so on
+/// 30 days (megabytes of buckets, mostly not in cache) resolving strings in order waits on one
+/// cache miss after another; asking for the string `AHEAD` entries early overlaps those misses.
+#[inline(always)]
+fn prefetch(p: *const u8) {
+    // SAFETY: a prefetch is only a hint; it never faults and reads nothing the program sees.
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        std::arch::x86_64::_mm_prefetch(p.cast::<i8>(), std::arch::x86_64::_MM_HINT_T0);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = p;
+}
+
 /// Grows `v` as needed and returns slot `i`.
 #[inline]
 fn slot<T: Default + Clone>(v: &mut Vec<T>, i: u32) -> &mut T {
@@ -496,6 +513,9 @@ struct Step<'a> {
     hosts: Option<&'a HashMap<String, [u64; 2]>>,
     /// Bucket string index → id.
     local: Vec<u32>,
+    /// The bucket's `flows` and `apps` entries, gathered so their keys can be prefetched.
+    flow_lists: Vec<(&'a String, &'a Vec<[u64; 5]>)>,
+    app_totals: Vec<(&'a String, [u64; 2])>,
     /// Per app id: Σ flows this step, and which ids were touched.
     fsum: Vec<[u64; 2]>,
     touched: Vec<u32>,
@@ -517,10 +537,22 @@ impl<'a> Step<'a> {
         // The whole table in order: nearly every entry is used, and walking it in order is
         // much kinder to the cache than resolving entries in flow order.
         self.local.clear();
-        self.local.extend(b.strs.iter().map(|s| ix.id(s)));
+        for (i, s) in b.strs.iter().enumerate() {
+            if let Some(n) = b.strs.get(i + AHEAD) {
+                prefetch(n.as_ptr());
+            }
+            self.local.push(ix.id(s));
+        }
+        let mut lists = std::mem::take(&mut self.flow_lists);
+        lists.clear();
+        lists.extend(&b.flows);
         let local = &self.local;
         let res = |i: u64| usize::try_from(i).ok().and_then(|i| local.get(i).copied());
-        for (app, list) in &b.flows {
+        for (i, &(app, list)) in lists.iter().enumerate() {
+            if let Some((k, l)) = lists.get(i + AHEAD) {
+                prefetch(k.as_ptr());
+                prefetch(l.as_ptr().cast());
+            }
             let app = ix.id(app);
             let mut sum = [0, 0];
             for e in list {
@@ -532,10 +564,18 @@ impl<'a> Step<'a> {
             add2(slot(&mut self.fsum, app), sum);
             self.touched.push(app);
         }
-        for (app, a) in &b.apps {
+        self.flow_lists = lists;
+        let mut totals = std::mem::take(&mut self.app_totals);
+        totals.clear();
+        totals.extend(b.apps.iter().map(|(k, a)| (k, *a)));
+        for (i, &(app, a)) in totals.iter().enumerate() {
+            if let Some((k, _)) = totals.get(i + AHEAD) {
+                prefetch(k.as_ptr());
+            }
             let app = ix.id(app);
-            self.push_app(app, *a);
+            self.push_app(app, a);
         }
+        self.app_totals = totals;
         self.finish([b.down, b.up]);
         self.lan = [b.lan_down, b.lan_up];
         self.hosts = Some(&b.hosts);
@@ -627,6 +667,8 @@ struct Acc<'a> {
     /// Flow index → next flow index of the same host (`NONE` ends the chain).
     next: Vec<u32>,
     stamp: u32,
+    /// The current bucket's `hosts` map, gathered so its keys can be prefetched.
+    map_hosts: Vec<(&'a String, [u64; 2])>,
     view: Vec<Atom>,
     total: [u64; 2],
     lan: [u64; 2],
@@ -664,6 +706,7 @@ impl<'a> Acc<'a> {
             split: Vec::new(),
             next: Vec::new(),
             stamp: 0,
+            map_hosts: Vec::new(),
             view: Vec::new(),
             total: [0, 0],
             lan: [0, 0],
@@ -806,10 +849,12 @@ impl<'a> Acc<'a> {
                 e.head = i as u32;
             }
         }
-        for (h, hv) in map {
-            let hv = mul2(*hv, mask);
-            if !nonzero(hv) {
-                continue;
+        let mut entries = std::mem::take(&mut self.map_hosts);
+        entries.clear();
+        entries.extend(map.iter().map(|(h, hv)| (h, mul2(*hv, mask))).filter(|(_, hv)| nonzero(*hv)));
+        for (n, &(h, hv)) in entries.iter().enumerate() {
+            if let Some((k, _)) = entries.get(n + AHEAD) {
+                prefetch(k.as_ptr());
             }
             let id = self.ix.id(h);
             let e = *slot(&mut self.split, id);
@@ -825,6 +870,7 @@ impl<'a> Acc<'a> {
                 i = self.next[i as usize];
             }
         }
+        self.map_hosts = entries;
     }
 
     fn row_atom(&mut self, a: &Atom) {
