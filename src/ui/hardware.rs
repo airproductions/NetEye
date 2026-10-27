@@ -38,8 +38,8 @@ impl HardwarePage {
         let left_w = 600.0f32.min(full.width() * 0.45);
         let left = Rect::from_min_max(full.min, Pos2::new(full.left() + left_w, full.bottom()));
         let right = Rect::from_min_max(Pos2::new(left.right(), full.top()), full.max);
-        ui.painter().rect_filled(left, CornerRadius::ZERO, c::PANEL);
-        ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, c::BORDER));
+        ui.painter().rect_filled(left, CornerRadius::ZERO, c::panel());
+        ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, c::border()));
         let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left));
         self.list(&mut lui, s, icons);
         let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink2(Vec2::new(24.0, 0.0))));
@@ -51,7 +51,7 @@ impl HardwarePage {
         ui.add_space(14.0);
         ui.horizontal(|ui| {
             ui.add_space(14.0);
-            theme::label(ui, "Process resource usage", theme::semibold(15.0), c::TEXT);
+            theme::label(ui, "Process resource usage", theme::semibold(15.0), c::text());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(12.0);
                 theme::search_box(ui, &mut self.search, 200.0, "Search");
@@ -65,7 +65,7 @@ impl HardwarePage {
             let w = if right { 70.0 } else { 120.0 };
             let hit = if right { Rect::from_min_max(Pos2::new(x - w, hr.top()), Pos2::new(x, hr.bottom())) } else { Rect::from_min_size(Pos2::new(x, hr.top()), Vec2::new(w, hr.height())) };
             let resp = ui.interact(hit, ui.id().with(label), Sense::click());
-            let col = if self.sort == sort { c::TEXT } else if resp.hovered() { c::TEXT } else { c::MUTED };
+            let col = if self.sort == sort { c::text() } else if resp.hovered() { c::text() } else { c::muted() };
             let font = if self.sort == sort { theme::semibold(13.0) } else { theme::regular(13.0) };
             let p = ui.painter();
             if right { theme::text_right(p, Pos2::new(x, hr.center().y), label, font, col); } else { p.text(Pos2::new(x, hr.center().y), Align2::LEFT_CENTER, label, font, col); }
@@ -73,7 +73,7 @@ impl HardwarePage {
                 self.sort = sort;
             }
         }
-        ui.painter().line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::BORDER));
+        ui.painter().line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::border()));
 
         let q = self.search.to_lowercase();
         let mut apps: Vec<(String, String, ProcSample, Vec<(u32, String, ProcSample)>)> = s
@@ -96,14 +96,14 @@ impl HardwarePage {
             // All apps
             let (row, resp) = ui.allocate_exact_size(Vec2::new(r.width(), ROW_H), Sense::click());
             let p = ui.painter();
-            p.rect_filled(row, CornerRadius::ZERO, if self.selected.is_none() { c::SELECTED } else if resp.hovered() { c::HOVER } else { c::PANEL });
-            theme::glyph(p, Rect::from_center_size(Pos2::new(row.left() + 26.0, row.center().y), Vec2::splat(16.0)), Glyph::Apps, c::ACCENT);
-            p.text(Pos2::new(row.left() + 46.0, row.center().y), Align2::LEFT_CENTER, "All apps", theme::semibold(14.0), c::TEXT);
+            p.rect_filled(row, CornerRadius::ZERO, if self.selected.is_none() { c::selected() } else if resp.hovered() { c::hover() } else { c::panel() });
+            theme::glyph(p, Rect::from_center_size(Pos2::new(row.left() + 26.0, row.center().y), Vec2::splat(16.0)), Glyph::Grid, c::accent());
+            p.text(Pos2::new(row.left() + 46.0, row.center().y), Align2::LEFT_CENTER, "All apps", theme::semibold(14.0), c::text());
             let y = row.center().y;
-            theme::text_right(p, Pos2::new(xc, y), &format!("{:.0} %", sys.cpu), theme::regular(13.5), c::TEXT);
-            theme::text_right(p, Pos2::new(xg, y), &format!("{:.0} %", sys.gpu), theme::regular(13.5), c::TEXT);
-            theme::text_right(p, Pos2::new(xm, y), &theme::bytes(sys.mem_used), theme::regular(13.5), c::TEXT);
-            theme::text_right(p, Pos2::new(xd, y), &theme::rate(sys.disk_read + sys.disk_write), theme::regular(13.5), c::TEXT);
+            theme::text_right(p, Pos2::new(xc, y), &format!("{:.0} %", sys.cpu), theme::regular(13.5), c::text());
+            theme::text_right(p, Pos2::new(xg, y), &format!("{:.0} %", sys.gpu), theme::regular(13.5), c::text());
+            theme::text_right(p, Pos2::new(xm, y), &theme::bytes(sys.mem_used), theme::regular(13.5), c::text());
+            theme::text_right(p, Pos2::new(xd, y), &theme::rate(sys.disk_read + sys.disk_write), theme::regular(13.5), c::text());
             if resp.clicked() {
                 self.selected = None;
             }
@@ -114,24 +114,24 @@ impl HardwarePage {
                 let expanded = self.expanded.contains(key);
                 let p = ui.painter().clone();
                 if selected {
-                    p.rect_filled(row, CornerRadius::ZERO, c::SELECTED);
+                    p.rect_filled(row, CornerRadius::ZERO, c::selected());
                 } else if resp.hovered() {
-                    p.rect_filled(row, CornerRadius::ZERO, c::HOVER);
+                    p.rect_filled(row, CornerRadius::ZERO, c::hover());
                 } else if i % 2 == 0 {
-                    p.rect_filled(row, CornerRadius::ZERO, c::ROW_ALT);
+                    p.rect_filled(row, CornerRadius::ZERO, c::row_alt());
                 }
                 let y = row.center().y;
                 let chev = Rect::from_center_size(Pos2::new(row.left() + 8.0 + 4.0, y), Vec2::splat(16.0));
                 let chev_resp = ui.interact(chev.expand(4.0), ui.id().with(("chev", key)), Sense::click());
-                theme::glyph(&p, chev.shrink(2.0), if expanded { Glyph::ChevronDown } else { Glyph::Chevron }, c::MUTED);
+                theme::glyph(&p, chev.shrink(2.0), if expanded { Glyph::ChevronDown } else { Glyph::Chevron }, c::muted());
                 icons.draw(ui, s, key, Rect::from_center_size(Pos2::new(row.left() + 34.0, y), Vec2::splat(18.0)), name);
                 let label = if procs.len() > 1 { format!("{name} ({})", procs.len()) } else { name.clone() };
-                theme::text(&p, Pos2::new(row.left() + 52.0, y), &label, theme::regular(14.0), c::TEXT, xc - row.left() - 120.0);
-                theme::text_right(&p, Pos2::new(xc, y), &pct(t.cpu), theme::regular(13.5), c::TEXT);
-                theme::text_right(&p, Pos2::new(xg, y), &pct(t.gpu), theme::regular(13.5), c::TEXT);
-                theme::text_right(&p, Pos2::new(xm, y), &theme::bytes(t.memory), theme::regular(13.5), c::TEXT);
+                theme::text(&p, Pos2::new(row.left() + 52.0, y), &label, theme::regular(14.0), c::text(), xc - row.left() - 120.0);
+                theme::text_right(&p, Pos2::new(xc, y), &pct(t.cpu), theme::regular(13.5), c::text());
+                theme::text_right(&p, Pos2::new(xg, y), &pct(t.gpu), theme::regular(13.5), c::text());
+                theme::text_right(&p, Pos2::new(xm, y), &theme::bytes(t.memory), theme::regular(13.5), c::text());
                 if t.disk >= 1000.0 {
-                    theme::text_right(&p, Pos2::new(xd, y), &theme::rate(t.disk), theme::regular(13.5), c::TEXT);
+                    theme::text_right(&p, Pos2::new(xd, y), &theme::rate(t.disk), theme::regular(13.5), c::text());
                 }
                 if chev_resp.clicked() {
                     if expanded { self.expanded.remove(key); } else { self.expanded.insert(key.clone()); }
@@ -144,14 +144,14 @@ impl HardwarePage {
                     for (pid, exe, ps) in procs {
                         let (sr, _) = ui.allocate_exact_size(Vec2::new(r.width(), 26.0), Sense::hover());
                         let p = ui.painter();
-                        p.rect_filled(sr, CornerRadius::ZERO, c::BG);
+                        p.rect_filled(sr, CornerRadius::ZERO, c::bg());
                         let y = sr.center().y;
-                        theme::text(p, Pos2::new(sr.left() + 52.0, y), &format!("{exe}  ·  PID {pid}"), theme::regular(12.5), c::MUTED, xc - sr.left() - 120.0);
-                        theme::text_right(p, Pos2::new(xc, y), &pct(ps.cpu), theme::regular(12.5), c::MUTED);
-                        theme::text_right(p, Pos2::new(xg, y), &pct(ps.gpu), theme::regular(12.5), c::MUTED);
-                        theme::text_right(p, Pos2::new(xm, y), &theme::bytes(ps.memory), theme::regular(12.5), c::MUTED);
+                        theme::text(p, Pos2::new(sr.left() + 52.0, y), &format!("{exe}  ·  PID {pid}"), theme::regular(12.5), c::muted(), xc - sr.left() - 120.0);
+                        theme::text_right(p, Pos2::new(xc, y), &pct(ps.cpu), theme::regular(12.5), c::muted());
+                        theme::text_right(p, Pos2::new(xg, y), &pct(ps.gpu), theme::regular(12.5), c::muted());
+                        theme::text_right(p, Pos2::new(xm, y), &theme::bytes(ps.memory), theme::regular(12.5), c::muted());
                         if ps.disk >= 1000.0 {
-                            theme::text_right(p, Pos2::new(xd, y), &theme::rate(ps.disk), theme::regular(12.5), c::MUTED);
+                            theme::text_right(p, Pos2::new(xd, y), &theme::rate(ps.disk), theme::regular(12.5), c::muted());
                         }
                     }
                 }
@@ -169,8 +169,8 @@ impl HardwarePage {
             Some(k) => s.app_name(k),
             None => "All apps".into(),
         };
-        p.text(Pos2::new(r.left(), r.top() + 26.0), Align2::LEFT_CENTER, &title, theme::semibold(16.0), c::TEXT);
-        p.text(Pos2::new(r.right(), r.top() + 26.0), Align2::RIGHT_CENTER, "5 Minutes", theme::regular(13.5), c::MUTED);
+        p.text(Pos2::new(r.left(), r.top() + 26.0), Align2::LEFT_CENTER, &title, theme::semibold(16.0), c::text());
+        p.text(Pos2::new(r.right(), r.top() + 26.0), Align2::RIGHT_CENTER, "5 Minutes", theme::regular(13.5), c::muted());
 
         let n = HW_SECONDS;
         let pad = |v: Vec<f64>| -> Vec<f64> {
@@ -229,11 +229,11 @@ impl HardwarePage {
             let x = r.left() + r.width() * i as f32 / 5.0;
             let t = now - (n as i64) + (n as i64) * i / 5;
             let align = if i == 0 { Align2::LEFT_TOP } else if i == 5 { Align2::RIGHT_TOP } else { Align2::CENTER_TOP };
-            p.text(Pos2::new(x, ay), align, theme::local(t).format("%-I:%M:%S %p").to_string(), theme::regular(12.0), c::MUTED);
+            p.text(Pos2::new(x, ay), align, theme::local(t).format("%-I:%M:%S %p").to_string(), theme::regular(12.0), c::muted());
         }
         // stats row
         let sr = Rect::from_min_max(Pos2::new(r.left(), r.bottom() - stats_h), r.max);
-        p.line_segment([sr.left_top(), sr.right_top()], Stroke::new(1.0_f32, c::BORDER));
+        p.line_segment([sr.left_top(), sr.right_top()], Stroke::new(1.0_f32, c::border()));
         let stats = [
             (format!("{:.0} %", sys.cpu), "CPU usage"),
             (theme::bytes(sys.mem_used), "Memory usage"),
@@ -245,8 +245,8 @@ impl HardwarePage {
         let w = sr.width() / stats.len() as f32;
         for (i, (v, l)) in stats.iter().enumerate() {
             let cx = sr.left() + w * (i as f32 + 0.5);
-            p.text(Pos2::new(cx, sr.center().y - 10.0), Align2::CENTER_CENTER, v, theme::semibold(17.0), c::TEXT);
-            p.text(Pos2::new(cx, sr.center().y + 14.0), Align2::CENTER_CENTER, *l, theme::regular(13.0), c::MUTED);
+            p.text(Pos2::new(cx, sr.center().y - 10.0), Align2::CENTER_CENTER, v, theme::semibold(17.0), c::text());
+            p.text(Pos2::new(cx, sr.center().y + 14.0), Align2::CENTER_CENTER, *l, theme::regular(13.0), c::muted());
         }
     }
 }

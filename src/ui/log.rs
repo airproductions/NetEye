@@ -34,8 +34,8 @@ impl LogPage {
 
         let mut clear = false;
         let (bar, _) = ui.allocate_exact_size(Vec2::new(full.width(), 72.0), Sense::hover());
-        ui.painter().rect_filled(bar, CornerRadius::ZERO, c::PANEL);
-        ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0_f32, c::BORDER));
+        ui.painter().rect_filled(bar, CornerRadius::ZERO, c::panel());
+        ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0_f32, c::border()));
         let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(24.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
         theme::dropdown(&mut b, "log-filter", &FILTERS, &mut self.filter);
         theme::dropdown(&mut b, "log-period", &PERIODS, &mut self.period);
@@ -100,20 +100,20 @@ impl LogPage {
                         day.format("%A, %-d %B %Y").to_string()
                     };
                     let (r, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
-                    ui.painter().text(Pos2::new(r.left() + 48.0, r.center().y), Align2::LEFT_CENTER, label, theme::semibold(15.5), c::TEXT);
+                    ui.painter().text(Pos2::new(r.left() + 48.0, r.center().y), Align2::LEFT_CENTER, label, theme::semibold(15.5), c::text());
                 }
                 let (r, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::hover());
                 let card = Rect::from_min_max(Pos2::new(r.left() + 40.0, r.top()), Pos2::new(r.right() - 40.0, r.bottom()));
                 let p = ui.painter().clone();
-                p.rect_filled(card, CornerRadius::ZERO, if resp.hovered() { c::HOVER } else { c::PANEL });
+                p.rect_filled(card, CornerRadius::ZERO, if resp.hovered() { c::hover() } else { c::panel() });
                 if idx_in_group > 0 {
-                    p.line_segment([Pos2::new(card.left() + 20.0, card.top()), Pos2::new(card.right() - 20.0, card.top())], Stroke::new(1.0_f32, c::BORDER));
+                    p.line_segment([Pos2::new(card.left() + 20.0, card.top()), Pos2::new(card.right() - 20.0, card.top())], Stroke::new(1.0_f32, c::border()));
                 }
                 idx_in_group += 1;
                 let cy = card.center().y;
                 badge(&p, Pos2::new(card.left() + 44.0, cy), e.kind);
                 if fresh.contains(&e.id) {
-                    p.circle_filled(Pos2::new(card.left() + 14.0, cy), 4.0, c::ACCENT);
+                    p.circle_filled(Pos2::new(card.left() + 14.0, cy), 4.0, c::accent());
                 }
 
                 let mut x = card.left() + 88.0;
@@ -127,8 +127,8 @@ impl LogPage {
                 for (t, bold) in segments(e) {
                     x = seg(&p, x, cy, &t, bold, max_x);
                 }
-                p.text(Pos2::new(card.right() - 28.0, cy - 11.0), Align2::RIGHT_CENTER, e.kind.source(), theme::regular(13.0), c::MUTED);
-                p.text(Pos2::new(card.right() - 28.0, cy + 11.0), Align2::RIGHT_CENTER, theme::local(e.t).format("%-I:%M %P").to_string(), theme::regular(13.0), c::MUTED);
+                p.text(Pos2::new(card.right() - 28.0, cy - 11.0), Align2::RIGHT_CENTER, e.kind.source(), theme::regular(13.0), c::muted());
+                p.text(Pos2::new(card.right() - 28.0, cy + 11.0), Align2::RIGHT_CENTER, theme::local(e.t).format("%-I:%M %P").to_string(), theme::regular(13.0), c::muted());
             }
             ui.add_space(24.0);
         });
@@ -169,20 +169,20 @@ fn seg(p: &egui::Painter, x: f32, y: f32, t: &str, bold: bool, max_x: f32) -> f3
         return x;
     }
     let font = if bold { theme::semibold(14.5) } else { theme::regular(14.5) };
-    let r = theme::text(p, Pos2::new(x, y), t, font, c::TEXT, max_x - x);
+    let r = theme::text(p, Pos2::new(x, y), t, font, c::text(), max_x - x);
     // keep a trailing space visible: layout trims it, so add the advance manually
     r.right() + if t.ends_with(' ') { 4.0 } else { 0.0 }
 }
 
 fn badge(p: &egui::Painter, center: Pos2, kind: EventKind) {
     let (col, g, txt) = match kind {
-        EventKind::NewApp => (c::GOOD, None, Some("NEW")),
-        EventKind::InternetUp => (c::GOOD, Some(Glyph::Plug), None),
-        EventKind::InternetDown => (c::ORANGE, Some(Glyph::Plug), None),
-        EventKind::VersionChanged => (c::WARN, Some(Glyph::Info), None),
-        EventKind::NewDevice => (c::ACCENT, Some(Glyph::Scanner), None),
+        EventKind::NewApp => (c::good(), None, Some("NEW")),
+        EventKind::InternetUp => (c::good(), Some(Glyph::Plug), None),
+        EventKind::InternetDown => (c::orange(), Some(Glyph::Plug), None),
+        EventKind::VersionChanged => (c::warn(), Some(Glyph::Info), None),
+        EventKind::NewDevice => (c::accent(), Some(Glyph::Scanner), None),
         EventKind::Firewall => (Color32::from_rgb(0x64, 0x6c, 0x7c), Some(Glyph::Shield), None),
-        EventKind::DataCap => (c::BAD, Some(Glyph::Info), None),
+        EventKind::DataCap => (c::bad(), Some(Glyph::Info), None),
     };
     p.circle_filled(center, 20.0, col);
     if let Some(g) = g {

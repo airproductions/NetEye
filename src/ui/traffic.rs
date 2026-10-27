@@ -141,8 +141,8 @@ impl TrafficPage {
         let right = Rect::from_min_max(Pos2::new(left.right(), full.top()), Pos2::new(full.right(), full.bottom() - footer_h));
         let footer = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - footer_h), full.max);
 
-        ui.painter().rect_filled(left, CornerRadius::ZERO, c::PANEL);
-        ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, c::BORDER));
+        ui.painter().rect_filled(left, CornerRadius::ZERO, c::panel());
+        ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0_f32, c::border()));
         let mut lui = ui.new_child(egui::UiBuilder::new().max_rect(left));
         self.app_list(&mut lui, s, icons, &series);
         let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right.shrink2(Vec2::new(24.0, 0.0))));
@@ -164,8 +164,8 @@ impl TrafficPage {
                     self.search.clear();
                 }
             } else {
-                theme::label(ui, "Apps", theme::semibold(15.0), c::TEXT);
-                theme::label(ui, format!("· {}", RANGES[self.range]), theme::regular(14.0), c::MUTED);
+                theme::label(ui, "Apps", theme::semibold(15.0), c::text());
+                theme::label(ui, format!("· {}", RANGES[self.range]), theme::regular(14.0), c::muted());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
                     if theme::icon_button(ui, Glyph::Search, 30.0, "Search").clicked() {
@@ -179,10 +179,10 @@ impl TrafficPage {
         let (cd, cu) = (r.right() - 88.0, r.right() - 14.0);
         let (hr, _) = ui.allocate_exact_size(Vec2::new(r.width(), 28.0), Sense::hover());
         let p = ui.painter();
-        p.text(Pos2::new(r.left() + 46.0, hr.center().y), Align2::LEFT_CENTER, "App", theme::regular(13.0), c::MUTED);
-        theme::glyph(p, Rect::from_center_size(Pos2::new(cd - 26.0, hr.center().y), Vec2::splat(13.0)), Glyph::Down, c::DOWN);
-        theme::glyph(p, Rect::from_center_size(Pos2::new(cu - 26.0, hr.center().y), Vec2::splat(13.0)), Glyph::Up, c::UP);
-        p.line_segment([Pos2::new(r.left(), hr.bottom()), Pos2::new(r.right(), hr.bottom())], Stroke::new(1.0_f32, c::BORDER));
+        p.text(Pos2::new(r.left() + 46.0, hr.center().y), Align2::LEFT_CENTER, "App", theme::regular(13.0), c::muted());
+        theme::glyph(p, Rect::from_center_size(Pos2::new(cd - 26.0, hr.center().y), Vec2::splat(13.0)), Glyph::Down, c::down());
+        theme::glyph(p, Rect::from_center_size(Pos2::new(cu - 26.0, hr.center().y), Vec2::splat(13.0)), Glyph::Up, c::up());
+        p.line_segment([Pos2::new(r.left(), hr.bottom()), Pos2::new(r.right(), hr.bottom())], Stroke::new(1.0_f32, c::border()));
 
         let mut apps: Vec<(String, String, [u64; 2])> = series
             .app_totals
@@ -219,17 +219,17 @@ impl TrafficPage {
                     let j = i - apps.len() - 1;
                     let (row, resp) = ui.allocate_exact_size(Vec2::new(r.width(), ROW_H), Sense::hover());
                     if j == 0 {
-                        ui.painter().text(Pos2::new(row.left() + 16.0, row.center().y + 4.0), Align2::LEFT_CENTER, "CONNECTED NOW", theme::semibold(11.5), c::MUTED);
+                        ui.painter().text(Pos2::new(row.left() + 16.0, row.center().y + 4.0), Align2::LEFT_CENTER, "CONNECTED NOW", theme::semibold(11.5), c::muted());
                         continue;
                     }
                     let (k, name, n) = &connected[j - 1];
                     if resp.hovered() {
-                        ui.painter().rect_filled(row, CornerRadius::ZERO, c::HOVER);
+                        ui.painter().rect_filled(row, CornerRadius::ZERO, c::hover());
                     }
                     icons.draw(ui, s, k, Rect::from_center_size(Pos2::new(row.left() + 26.0, row.center().y), Vec2::splat(18.0)), name);
                     let p = ui.painter();
-                    theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), c::TEXT, cd - row.left() - 120.0);
-                    theme::text_right(p, Pos2::new(cu, row.center().y), &format!("{n} conn{}", if *n == 1 { "" } else { "s" }), theme::regular(13.0), c::MUTED);
+                    theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), name, theme::regular(14.0), c::text(), cd - row.left() - 120.0);
+                    theme::text_right(p, Pos2::new(cu, row.center().y), &format!("{n} conn{}", if *n == 1 { "" } else { "s" }), theme::regular(13.0), c::muted());
                     continue;
                 }
                 let (key, name, v) = if i == 0 { (None, "All apps".to_string(), all) } else {
@@ -240,22 +240,22 @@ impl TrafficPage {
                 let selected = self.selected == key;
                 let p = ui.painter();
                 if selected {
-                    p.rect_filled(row, CornerRadius::ZERO, c::SELECTED);
+                    p.rect_filled(row, CornerRadius::ZERO, c::selected());
                 } else if resp.hovered() {
-                    p.rect_filled(row, CornerRadius::ZERO, c::HOVER);
+                    p.rect_filled(row, CornerRadius::ZERO, c::hover());
                 } else if i % 2 == 1 {
-                    p.rect_filled(row, CornerRadius::ZERO, c::ROW_ALT);
+                    p.rect_filled(row, CornerRadius::ZERO, c::row_alt());
                 }
                 let ir = Rect::from_center_size(Pos2::new(row.left() + 26.0, row.center().y), Vec2::splat(18.0));
                 match &key {
-                    None => theme::glyph(p, ir, Glyph::Apps, c::ACCENT),
-                    Some(k) if k == OTHER_KEY => theme::glyph(p, ir, Glyph::Globe, c::MUTED),
+                    None => theme::glyph(p, ir, Glyph::Grid, c::accent()),
+                    Some(k) if k == OTHER_KEY => theme::glyph(p, ir, Glyph::Globe, c::muted()),
                     Some(k) => icons.draw(ui, s, k, ir, &name),
                 }
                 let p = ui.painter();
-                theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), &name, if i == 0 { theme::semibold(14.0) } else { theme::regular(14.0) }, c::TEXT, cd - row.left() - 120.0);
-                theme::text_right(p, Pos2::new(cd, row.center().y), &theme::bytes(v[0]), theme::regular(13.5), c::TEXT);
-                theme::text_right(p, Pos2::new(cu, row.center().y), &theme::bytes(v[1]), theme::regular(13.5), c::TEXT);
+                theme::text(p, Pos2::new(row.left() + 46.0, row.center().y), &name, if i == 0 { theme::semibold(14.0) } else { theme::regular(14.0) }, c::text(), cd - row.left() - 120.0);
+                theme::text_right(p, Pos2::new(cd, row.center().y), &theme::bytes(v[0]), theme::regular(13.5), c::text());
+                theme::text_right(p, Pos2::new(cu, row.center().y), &theme::bytes(v[1]), theme::regular(13.5), c::text());
                 if resp.clicked() {
                     self.selected = key;
                 }
@@ -271,16 +271,16 @@ impl TrafficPage {
                 let name = s.app_name(&k);
                 let (ir, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
                 if k == OTHER_KEY {
-                    theme::glyph(ui.painter(), ir, Glyph::Globe, c::MUTED);
+                    theme::glyph(ui.painter(), ir, Glyph::Globe, c::muted());
                 } else {
                     icons.draw(ui, s, &k, ir, &name);
                 }
-                theme::label(ui, name, theme::semibold(16.0), c::TEXT);
+                theme::label(ui, name, theme::semibold(16.0), c::text());
                 if theme::pill(ui, "Show all apps", None, false).clicked() {
                     self.selected = None;
                 }
             } else {
-                theme::label(ui, "All apps", theme::semibold(16.0), c::TEXT);
+                theme::label(ui, "All apps", theme::semibold(16.0), c::text());
             }
         });
         // centered mode switch + range dropdown at the right, overlaid on the same row
@@ -315,9 +315,9 @@ impl TrafficPage {
                 1 | 2 => theme::clock(t),
                 _ => theme::local(t).format("%a %-d").to_string(),
             };
-            p.line_segment([Pos2::new(x, chart.bottom()), Pos2::new(x, chart.bottom() + 4.0)], Stroke::new(1.0_f32, c::BORDER));
+            p.line_segment([Pos2::new(x, chart.bottom()), Pos2::new(x, chart.bottom() + 4.0)], Stroke::new(1.0_f32, c::border()));
             let align = if i == 0 { Align2::LEFT_TOP } else if i == ticks { Align2::RIGHT_TOP } else { Align2::CENTER_TOP };
-            p.text(Pos2::new(x, chart.bottom() + 8.0), align, label, theme::regular(12.0), c::MUTED);
+            p.text(Pos2::new(x, chart.bottom() + 8.0), align, label, theme::regular(12.0), c::muted());
         }
     }
 
@@ -336,11 +336,11 @@ impl TrafficPage {
         for i in 1..=4 {
             let y = chart.bottom() - chart.height() * i as f32 / 4.0;
             p.line_segment([Pos2::new(chart.left(), y), Pos2::new(chart.right(), y)], Stroke::new(1.0_f32, Color32::from_rgb(0x20, 0x24, 0x2c)));
-            p.text(Pos2::new(chart.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::rate(nice * i as f64 / 4.0), theme::regular(11.5), c::FAINT);
+            p.text(Pos2::new(chart.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::rate(nice * i as f64 / 4.0), theme::regular(11.5), c::faint());
         }
-        p.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, c::BORDER));
-        theme::area(&p, chart, &down, nice, c::DOWN);
-        theme::area(&p, chart, &up, nice, c::UP);
+        p.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, c::border()));
+        theme::area(&p, chart, &down, nice, c::down());
+        theme::area(&p, chart, &up, nice, c::up());
         self.time_axis(&p, chart, series);
 
         let resp = ui.interact(chart, ui.id().with("graph"), Sense::hover());
@@ -348,10 +348,10 @@ impl TrafficPage {
             let n = series.times.len();
             let idx = (((pos.x - chart.left()) / chart.width()) * (n - 1) as f32).round().clamp(0.0, (n - 1) as f32) as usize;
             let x = chart.left() + chart.width() * idx as f32 / (n - 1) as f32;
-            p.line_segment([Pos2::new(x, chart.top()), Pos2::new(x, chart.bottom())], Stroke::new(1.0_f32, c::MUTED));
-            for (vals, col) in [(&down, c::DOWN), (&up, c::UP)] {
+            p.line_segment([Pos2::new(x, chart.top()), Pos2::new(x, chart.bottom())], Stroke::new(1.0_f32, c::muted()));
+            for (vals, col) in [(&down, c::down()), (&up, c::up())] {
                 let y = chart.bottom() - (vals[idx] / nice).clamp(0.0, 1.0) as f32 * chart.height();
-                p.circle(Pos2::new(x, y), 4.0, col, Stroke::new(2.0_f32, c::BG));
+                p.circle(Pos2::new(x, y), 4.0, col, Stroke::new(2.0_f32, c::bg()));
             }
             let t = series.times[idx];
             let apps = series.apps[idx].clone();
@@ -361,17 +361,17 @@ impl TrafficPage {
             let filtered = self.selected.is_some();
             egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("tip"), |ui| {
                 let when = if range == 0 { theme::local(t).format("%-I:%M:%S %p").to_string() } else if range <= 2 { theme::clock(t) } else { theme::local(t).format("%a %-d %b, %-I %p").to_string() };
-                theme::label(ui, when, theme::semibold(13.0), c::TEXT);
+                theme::label(ui, when, theme::semibold(13.0), c::text());
                 ui.horizontal(|ui| {
-                    theme::label(ui, format!("↓ {}", theme::rate(d)), theme::regular(13.0), c::DOWN);
-                    theme::label(ui, format!("↑ {}", theme::rate(u)), theme::regular(13.0), c::UP);
+                    theme::label(ui, format!("↓ {}", theme::rate(d)), theme::regular(13.0), c::down());
+                    theme::label(ui, format!("↑ {}", theme::rate(u)), theme::regular(13.0), c::up());
                 });
                 if !filtered && !names.is_empty() {
                     ui.separator();
                     for (n, v) in names {
                         ui.horizontal(|ui| {
-                            theme::label(ui, n, theme::regular(12.5), c::TEXT);
-                            theme::label(ui, theme::bytes(v[0] + v[1]), theme::regular(12.5), c::MUTED);
+                            theme::label(ui, n, theme::regular(12.5), c::text());
+                            theme::label(ui, theme::bytes(v[0] + v[1]), theme::regular(12.5), c::muted());
                         });
                     }
                 }
@@ -402,7 +402,7 @@ impl TrafficPage {
         for i in 1..=4 {
             let y = chart.bottom() - chart.height() * i as f32 / 4.0;
             p.line_segment([Pos2::new(chart.left(), y), Pos2::new(chart.right(), y)], Stroke::new(1.0_f32, Color32::from_rgb(0x20, 0x24, 0x2c)));
-            p.text(Pos2::new(chart.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::bytes((nice * i as f64 / 4.0) as u64), theme::regular(11.5), c::FAINT);
+            p.text(Pos2::new(chart.right() - 4.0, y - 9.0), Align2::RIGHT_CENTER, theme::bytes((nice * i as f64 / 4.0) as u64), theme::regular(11.5), c::faint());
         }
         let slot = chart.width() / groups.len() as f32;
         let bw = (slot * 0.34).min(16.0);
@@ -411,9 +411,9 @@ impl TrafficPage {
         for (i, (t, d, u)) in groups.iter().enumerate() {
             let cx = chart.left() + slot * (i as f32 + 0.5);
             if hover == Some(i) {
-                p.rect_filled(Rect::from_center_size(Pos2::new(cx, chart.center().y), Vec2::new(slot, chart.height())), CornerRadius::same(4), c::HOVER);
+                p.rect_filled(Rect::from_center_size(Pos2::new(cx, chart.center().y), Vec2::new(slot, chart.height())), CornerRadius::same(4), c::hover());
             }
-            for (v, col, off) in [(d, c::DOWN, -bw / 2.0 - 1.0), (u, c::UP, bw / 2.0 + 1.0)] {
+            for (v, col, off) in [(d, c::down(), -bw / 2.0 - 1.0), (u, c::up(), bw / 2.0 + 1.0)] {
                 let h = (*v / nice) as f32 * chart.height();
                 if h > 0.5 {
                     p.rect_filled(
@@ -430,17 +430,17 @@ impl TrafficPage {
                     1 | 2 => theme::clock(*t),
                     _ => theme::local(*t).format("%a %-d").to_string(),
                 };
-                p.text(Pos2::new(cx, chart.bottom() + 8.0), Align2::CENTER_TOP, label, theme::regular(12.0), c::MUTED);
+                p.text(Pos2::new(cx, chart.bottom() + 8.0), Align2::CENTER_TOP, label, theme::regular(12.0), c::muted());
             }
             if hover == Some(i) {
                 let (d, u, t) = (*d, *u, *t);
                 egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), ui.id().with("btip"), |ui| {
-                    theme::label(ui, theme::date_time(t), theme::semibold(13.0), c::TEXT);
-                    theme::label(ui, format!("↓ {}   ↑ {}", theme::bytes(d as u64), theme::bytes(u as u64)), theme::regular(13.0), c::TEXT);
+                    theme::label(ui, theme::date_time(t), theme::semibold(13.0), c::text());
+                    theme::label(ui, format!("↓ {}   ↑ {}", theme::bytes(d as u64), theme::bytes(u as u64)), theme::regular(13.0), c::text());
                 });
             }
         }
-        p.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, c::BORDER));
+        p.line_segment([chart.left_bottom(), chart.right_bottom()], Stroke::new(1.0_f32, c::border()));
     }
 
     fn hosts(&self, ui: &mut egui::Ui, s: &mut Shared, chart: Rect, series: &Series) {
@@ -458,22 +458,22 @@ impl TrafficPage {
                 let (row, resp) = ui.allocate_exact_size(Vec2::new(chart.width(), 40.0), Sense::hover());
                 let p = ui.painter();
                 if resp.hovered() {
-                    p.rect_filled(row, CornerRadius::same(6), c::HOVER);
+                    p.rect_filled(row, CornerRadius::same(6), c::hover());
                 }
-                theme::glyph(p, Rect::from_center_size(Pos2::new(row.left() + 18.0, row.center().y), Vec2::splat(16.0)), Glyph::Globe, c::MUTED);
+                theme::glyph(p, Rect::from_center_size(Pos2::new(row.left() + 18.0, row.center().y), Vec2::splat(16.0)), Glyph::Globe, c::muted());
                 let name_w = (row.width() * 0.42).min(420.0);
-                theme::text(p, Pos2::new(row.left() + 38.0, row.center().y), host, theme::regular(14.0), c::TEXT, name_w - 44.0);
+                theme::text(p, Pos2::new(row.left() + 38.0, row.center().y), host, theme::regular(14.0), c::text(), name_w - 44.0);
                 let bar_l = row.left() + name_w;
                 let bar_w = row.width() - name_w - 190.0;
                 let total = v[0] + v[1];
                 let wd = bar_w * v[0] as f32 / max as f32;
                 let wu = bar_w * v[1] as f32 / max as f32;
                 let by = row.center().y;
-                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l, by - 4.0), Vec2::new(bar_w, 8.0)), CornerRadius::same(4), c::RAISED);
-                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l, by - 4.0), Vec2::new(wd.max(2.0), 8.0)), CornerRadius::same(4), c::DOWN);
-                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l + wd, by - 4.0), Vec2::new(wu, 8.0)), CornerRadius::same(4), c::UP);
-                theme::text_right(p, Pos2::new(row.right() - 100.0, by), &format!("↓ {}", theme::bytes(v[0])), theme::regular(13.0), c::TEXT);
-                theme::text_right(p, Pos2::new(row.right() - 8.0, by), &format!("↑ {}", theme::bytes(v[1])), theme::regular(13.0), c::MUTED);
+                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l, by - 4.0), Vec2::new(bar_w, 8.0)), CornerRadius::same(4), c::raised());
+                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l, by - 4.0), Vec2::new(wd.max(2.0), 8.0)), CornerRadius::same(4), c::down());
+                p.rect_filled(Rect::from_min_size(Pos2::new(bar_l + wd, by - 4.0), Vec2::new(wu, 8.0)), CornerRadius::same(4), c::up());
+                theme::text_right(p, Pos2::new(row.right() - 100.0, by), &format!("↓ {}", theme::bytes(v[0])), theme::regular(13.0), c::text());
+                theme::text_right(p, Pos2::new(row.right() - 8.0, by), &format!("↑ {}", theme::bytes(v[1])), theme::regular(13.0), c::muted());
                 let _ = total;
             }
         });
@@ -482,8 +482,8 @@ impl TrafficPage {
     fn footer(&self, ui: &mut egui::Ui, s: &Shared, series: &Series) {
         let r = ui.max_rect();
         let p = ui.painter();
-        p.rect_filled(r, CornerRadius::ZERO, c::PANEL);
-        p.line_segment([r.left_top(), r.right_top()], Stroke::new(1.0_f32, c::BORDER));
+        p.rect_filled(r, CornerRadius::ZERO, c::panel());
+        p.line_segment([r.left_top(), r.right_top()], Stroke::new(1.0_f32, c::border()));
         let cur = s.live.back().map(|l| (l.down, l.up)).unwrap_or((0, 0));
         let today = s.store.data.daily.get(&chrono::Local::now().format("%Y-%m-%d").to_string()).copied().unwrap_or([0, 0]);
         let cy = r.center().y + 4.0;
@@ -499,39 +499,39 @@ impl TrafficPage {
             }).collect()
         };
         let (a0, a1) = (std::f32::consts::PI * 1.1, std::f32::consts::PI * 1.9);
-        p.add(egui::Shape::line(arc(a0, a1), Stroke::new(6.0_f32, c::RAISED)));
+        p.add(egui::Shape::line(arc(a0, a1), Stroke::new(6.0_f32, c::raised())));
         if frac > 0.0 {
-            let col = if frac >= 1.0 { c::BAD } else if frac > 0.8 { c::WARN } else { c::ACCENT };
+            let col = if frac >= 1.0 { c::bad() } else if frac > 0.8 { c::warn() } else { c::accent() };
             p.add(egui::Shape::line(arc(a0, a0 + (a1 - a0) * frac), Stroke::new(6.0_f32, col)));
         }
-        p.text(Pos2::new(gc.x, gc.y - 12.0), Align2::CENTER_CENTER, theme::bytes(today[0] + today[1]), theme::semibold(15.0), c::TEXT);
-        p.text(Pos2::new(gc.x, gc.y + 6.0), Align2::CENTER_CENTER, if cap > 0 { "today of cap" } else { "today" }, theme::regular(11.5), c::MUTED);
+        p.text(Pos2::new(gc.x, gc.y - 12.0), Align2::CENTER_CENTER, theme::bytes(today[0] + today[1]), theme::semibold(15.0), c::text());
+        p.text(Pos2::new(gc.x, gc.y + 6.0), Align2::CENTER_CENTER, if cap > 0 { "today of cap" } else { "today" }, theme::regular(11.5), c::muted());
 
-        theme::glyph(p, Rect::from_center_size(Pos2::new(r.left() + 52.0, cy), Vec2::splat(14.0)), Glyph::Down, c::DOWN);
-        p.text(Pos2::new(r.left() + 64.0, cy), Align2::LEFT_CENTER, theme::rate(cur.0 as f64), theme::semibold(16.0), c::TEXT);
-        theme::glyph(p, Rect::from_center_size(Pos2::new(r.left() + 260.0, cy), Vec2::splat(14.0)), Glyph::Up, c::UP);
-        p.text(Pos2::new(r.left() + 272.0, cy), Align2::LEFT_CENTER, theme::rate(cur.1 as f64), theme::semibold(16.0), c::TEXT);
+        theme::glyph(p, Rect::from_center_size(Pos2::new(r.left() + 52.0, cy), Vec2::splat(14.0)), Glyph::Down, c::down());
+        p.text(Pos2::new(r.left() + 64.0, cy), Align2::LEFT_CENTER, theme::rate(cur.0 as f64), theme::semibold(16.0), c::text());
+        theme::glyph(p, Rect::from_center_size(Pos2::new(r.left() + 260.0, cy), Vec2::splat(14.0)), Glyph::Up, c::up());
+        p.text(Pos2::new(r.left() + 272.0, cy), Align2::LEFT_CENTER, theme::rate(cur.1 as f64), theme::semibold(16.0), c::text());
 
         let x = r.left() + 420.0;
-        p.line_segment([Pos2::new(x - 24.0, r.top() + 18.0), Pos2::new(x - 24.0, r.bottom() - 18.0)], Stroke::new(1.0_f32, c::BORDER));
+        p.line_segment([Pos2::new(x - 24.0, r.top() + 18.0), Pos2::new(x - 24.0, r.bottom() - 18.0)], Stroke::new(1.0_f32, c::border()));
         let total = [series.down.iter().sum::<f64>() as u64, series.up.iter().sum::<f64>() as u64];
         let wan = [total[0].saturating_sub(series.lan[0]), total[1].saturating_sub(series.lan[1])];
         for (i, (label, v)) in [("Internet", wan), ("Local network", series.lan)].iter().enumerate() {
             let y = cy - 12.0 + i as f32 * 24.0;
-            p.text(Pos2::new(x, y), Align2::LEFT_CENTER, *label, theme::regular(13.0), c::MUTED);
-            p.text(Pos2::new(x + 110.0, y), Align2::LEFT_CENTER, format!("↓ {}   ↑ {}", theme::bytes(v[0]), theme::bytes(v[1])), theme::regular(13.0), c::TEXT);
+            p.text(Pos2::new(x, y), Align2::LEFT_CENTER, *label, theme::regular(13.0), c::muted());
+            p.text(Pos2::new(x + 110.0, y), Align2::LEFT_CENTER, format!("↓ {}   ↑ {}", theme::bytes(v[0]), theme::bytes(v[1])), theme::regular(13.0), c::text());
         }
 
         let conns: usize = s.apps_live.values().map(|a| a.in_conns + a.out_conns).sum();
         let active = s.apps_live.values().filter(|a| a.in_conns + a.out_conns > 0).count();
         let status = match s.internet {
-            Some(true) => ("Online", c::GOOD),
-            Some(false) => ("Offline", c::BAD),
-            None => ("Checking…", c::MUTED),
+            Some(true) => ("Online", c::good()),
+            Some(false) => ("Offline", c::bad()),
+            None => ("Checking…", c::muted()),
         };
         let rx = r.right() - 28.0;
-        p.circle_filled(Pos2::new(rx - p.layout_no_wrap(status.0.into(), theme::semibold(14.0), c::TEXT).size().x - 14.0, cy - 12.0), 4.5, status.1);
-        p.text(Pos2::new(rx, cy - 12.0), Align2::RIGHT_CENTER, status.0, theme::semibold(14.0), c::TEXT);
-        p.text(Pos2::new(rx, cy + 12.0), Align2::RIGHT_CENTER, format!("{active} apps · {conns} connections"), theme::regular(13.0), c::MUTED);
+        p.circle_filled(Pos2::new(rx - p.layout_no_wrap(status.0.into(), theme::semibold(14.0), c::text()).size().x - 14.0, cy - 12.0), 4.5, status.1);
+        p.text(Pos2::new(rx, cy - 12.0), Align2::RIGHT_CENTER, status.0, theme::semibold(14.0), c::text());
+        p.text(Pos2::new(rx, cy + 12.0), Align2::RIGHT_CENTER, format!("{active} apps · {conns} connections"), theme::regular(13.0), c::muted());
     }
 }

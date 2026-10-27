@@ -59,10 +59,10 @@ impl FirewallPage {
         let cols = Cols::new(full.left(), full.width());
         let (hr, _) = ui.allocate_exact_size(Vec2::new(full.width(), 34.0), Sense::hover());
         let p = ui.painter();
-        p.rect_filled(hr, CornerRadius::ZERO, c::PANEL);
+        p.rect_filled(hr, CornerRadius::ZERO, c::panel());
         let hy = hr.center().y;
         let head = |x: f32, t: &str| {
-            p.text(Pos2::new(x, hy), Align2::LEFT_CENTER, t, theme::regular(13.0), c::MUTED);
+            p.text(Pos2::new(x, hy), Align2::LEFT_CENTER, t, theme::regular(13.0), c::muted());
         };
         head(cols.app + 30.0, "Apps");
         head(cols.inc + 8.0, "Incoming");
@@ -70,10 +70,10 @@ impl FirewallPage {
         head(cols.publisher, "Publisher");
         head(cols.version, "Version");
         head(cols.hosts, "Hosts");
-        theme::glyph(p, Rect::from_center_size(Pos2::new(cols.down - 30.0, hy), Vec2::splat(13.0)), Glyph::Down, c::DOWN);
-        theme::glyph(p, Rect::from_center_size(Pos2::new(cols.up - 30.0, hy), Vec2::splat(13.0)), Glyph::Up, c::UP);
+        theme::glyph(p, Rect::from_center_size(Pos2::new(cols.down - 30.0, hy), Vec2::splat(13.0)), Glyph::Down, c::down());
+        theme::glyph(p, Rect::from_center_size(Pos2::new(cols.up - 30.0, hy), Vec2::splat(13.0)), Glyph::Up, c::up());
         head(cols.spark, "Traffic");
-        p.line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::BORDER));
+        p.line_segment([hr.left_bottom(), hr.right_bottom()], Stroke::new(1.0_f32, c::border()));
 
         let q = self.search.to_lowercase();
         let mut active: Vec<(String, String)> = Vec::new();
@@ -130,7 +130,7 @@ impl FirewallPage {
             }
             if active.is_empty() && inactive.is_empty() {
                 ui.add_space(60.0);
-                ui.vertical_centered(|ui| theme::label(ui, "No apps match your search.", theme::regular(14.0), c::MUTED));
+                ui.vertical_centered(|ui| theme::label(ui, "No apps match your search.", theme::regular(14.0), c::muted()));
             }
         });
     }
@@ -140,24 +140,24 @@ impl FirewallPage {
         let mut b = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(28.0, 16.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let enabled = s.store.data.settings.firewall_enabled;
         b.vertical(|ui| {
-            theme::label(ui, "Firewall rules", theme::semibold(15.0), c::TEXT);
+            theme::label(ui, "Firewall rules", theme::semibold(15.0), c::text());
             ui.horizontal(|ui| {
                 if theme::switch(ui, enabled).clicked() && !s.firewall_busy {
                     actions.push(Action::FirewallEnabled(!enabled));
                 }
-                theme::label(ui, if enabled { "On" } else { "Off" }, theme::semibold(13.0), if enabled { c::GOOD } else { c::MUTED });
+                theme::label(ui, if enabled { "On" } else { "Off" }, theme::semibold(13.0), if enabled { c::good() } else { c::muted() });
             });
         });
         b.add_space(28.0);
         sep(&mut b);
         b.add_space(28.0);
         b.vertical(|ui| {
-            theme::label(ui, "Click to block", theme::semibold(15.0), c::TEXT);
+            theme::label(ui, "Click to block", theme::semibold(15.0), c::text());
             let engine = match &s.firewall_product {
                 Some(p) if !p.to_lowercase().contains("windows") => format!("Enforced at the filtering layer · works alongside {p}"),
                 _ => "Enforced at the Windows filtering layer".to_string(),
             };
-            theme::label(ui, engine, theme::regular(13.0), c::MUTED)
+            theme::label(ui, engine, theme::regular(13.0), c::muted())
                 .on_hover_text("Blocks are Windows Filtering Platform filters, which apply no matter which firewall product is active. They persist across reboots.");
         });
         b.add_space(28.0);
@@ -165,15 +165,15 @@ impl FirewallPage {
         b.add_space(28.0);
         let blocked = s.store.data.apps.values().filter(|a| a.block_in || a.block_out).count();
         b.vertical(|ui| {
-            theme::label(ui, "Blocked apps", theme::semibold(15.0), c::TEXT);
-            theme::label(ui, blocked.to_string(), theme::regular(13.0), if blocked > 0 { c::BAD } else { c::MUTED });
+            theme::label(ui, "Blocked apps", theme::semibold(15.0), c::text());
+            theme::label(ui, blocked.to_string(), theme::regular(13.0), if blocked > 0 { c::bad() } else { c::muted() });
         });
         b.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             theme::search_box(ui, &mut self.search, 320.0, "Search apps, publishers, hosts");
             if s.firewall_busy {
                 ui.add_space(12.0);
-                ui.add(egui::Spinner::new().size(18.0).color(c::ACCENT));
-                theme::label(ui, "Applying…", theme::regular(13.0), c::MUTED);
+                ui.add(egui::Spinner::new().size(18.0).color(c::accent()));
+                theme::label(ui, "Applying…", theme::regular(13.0), c::muted());
             }
         });
     }
@@ -199,18 +199,18 @@ impl FirewallPage {
         let expanded = self.expanded.contains(key);
         let p = ui.painter().clone();
         if resp.hovered() {
-            p.rect_filled(row, CornerRadius::ZERO, c::HOVER);
+            p.rect_filled(row, CornerRadius::ZERO, c::hover());
         } else if i % 2 == 1 {
-            p.rect_filled(row, CornerRadius::ZERO, c::ROW_ALT);
+            p.rect_filled(row, CornerRadius::ZERO, c::row_alt());
         }
         let cy = row.center().y;
         let has_conns = !live.conns.is_empty();
         if has_conns {
-            theme::glyph(&p, Rect::from_center_size(Pos2::new(cols.app + 4.0, cy), Vec2::splat(12.0)), if expanded { Glyph::ChevronDown } else { Glyph::Chevron }, c::MUTED);
+            theme::glyph(&p, Rect::from_center_size(Pos2::new(cols.app + 4.0, cy), Vec2::splat(12.0)), if expanded { Glyph::ChevronDown } else { Glyph::Chevron }, c::muted());
         }
         let ir = Rect::from_center_size(Pos2::new(cols.app + 30.0, cy), Vec2::splat(20.0));
         icons.draw(ui, s, key, ir, name);
-        theme::text(&p, Pos2::new(cols.app + 48.0, cy), name, theme::regular(14.0), c::TEXT, cols.inc - cols.app - 60.0);
+        theme::text(&p, Pos2::new(cols.app + 48.0, cy), name, theme::regular(14.0), c::text(), cols.inc - cols.app - 60.0);
 
         let protected = rec.path.as_deref().map(crate::system::is_protected).unwrap_or(false);
         let blockable = rec.path.is_some() && key != SYSTEM_KEY && key != OTHER_KEY && !protected;
@@ -232,8 +232,8 @@ impl FirewallPage {
                 actions.push(Action::Block(key.to_string(), dir, !blocked));
             }
         }
-        theme::text(&p, Pos2::new(cols.publisher, cy), rec.publisher.as_deref().unwrap_or("—"), theme::regular(13.5), c::MUTED, 180.0);
-        theme::text(&p, Pos2::new(cols.version, cy), rec.version.as_deref().unwrap_or("—"), theme::regular(13.5), c::MUTED, 110.0);
+        theme::text(&p, Pos2::new(cols.publisher, cy), rec.publisher.as_deref().unwrap_or("—"), theme::regular(13.5), c::muted(), 180.0);
+        theme::text(&p, Pos2::new(cols.version, cy), rec.version.as_deref().unwrap_or("—"), theme::regular(13.5), c::muted(), 110.0);
 
         // hosts: current first, "+N more" chip
         let mut hosts: Vec<String> = live.conns.iter().filter_map(|c| c.host.clone().or_else(|| (!crate::net::is_local(&c.remote) && c.proto == Proto::Tcp).then(|| c.remote.to_string()))).collect();
@@ -245,22 +245,22 @@ impl FirewallPage {
         }
         let hosts_w = cols.down - 70.0 - cols.hosts;
         if let Some(first) = hosts.first() {
-            theme::glyph(&p, Rect::from_center_size(Pos2::new(cols.hosts + 7.0, cy), Vec2::splat(13.0)), Glyph::Globe, c::FAINT);
-            let tr = theme::text(&p, Pos2::new(cols.hosts + 20.0, cy), first, theme::regular(13.5), c::TEXT, hosts_w - 100.0);
+            theme::glyph(&p, Rect::from_center_size(Pos2::new(cols.hosts + 7.0, cy), Vec2::splat(13.0)), Glyph::Globe, c::faint());
+            let tr = theme::text(&p, Pos2::new(cols.hosts + 20.0, cy), first, theme::regular(13.5), c::text(), hosts_w - 100.0);
             if hosts.len() > 1 {
                 let label = format!("+{} more", hosts.len() - 1);
                 let chip = Rect::from_min_size(Pos2::new((tr.right() + 10.0).min(cols.hosts + hosts_w - 70.0), cy - 10.0), Vec2::new(66.0, 20.0));
-                p.rect_stroke(chip, CornerRadius::same(4), Stroke::new(1.0_f32, c::BORDER), egui::StrokeKind::Inside);
-                p.text(chip.center(), Align2::CENTER_CENTER, label, theme::regular(12.0), c::MUTED);
+                p.rect_stroke(chip, CornerRadius::same(4), Stroke::new(1.0_f32, c::border()), egui::StrokeKind::Inside);
+                p.text(chip.center(), Align2::CENTER_CENTER, label, theme::regular(12.0), c::muted());
                 let all = hosts.iter().take(25).cloned().collect::<Vec<_>>().join("\n");
                 ui.interact(chip, ui.id().with((key, "hosts")), Sense::hover()).on_hover_text(all);
             }
         }
         if live.rate[0] > 0 {
-            theme::text_right(&p, Pos2::new(cols.down, cy), &theme::rate(live.rate[0] as f64), theme::regular(13.5), c::TEXT);
+            theme::text_right(&p, Pos2::new(cols.down, cy), &theme::rate(live.rate[0] as f64), theme::regular(13.5), c::text());
         }
         if live.rate[1] > 0 {
-            theme::text_right(&p, Pos2::new(cols.up, cy), &theme::rate(live.rate[1] as f64), theme::regular(13.5), c::TEXT);
+            theme::text_right(&p, Pos2::new(cols.up, cy), &theme::rate(live.rate[1] as f64), theme::regular(13.5), c::text());
         }
         if let Some((d, u)) = spark {
             theme::spark(&p, Rect::from_min_max(Pos2::new(cols.spark, cy - 11.0), Pos2::new(cols.end - 6.0, cy + 11.0)), d, u);
@@ -283,23 +283,23 @@ impl FirewallPage {
                 p.rect_filled(r, CornerRadius::ZERO, Color32::from_rgb(0x17, 0x19, 0x1e));
                 let y = r.center().y;
                 let host = cv.host.clone().unwrap_or_else(|| cv.remote.to_string());
-                p.text(Pos2::new(cols.app + 48.0, y), Align2::LEFT_CENTER, if cv.inbound { "↘ Incoming" } else { "↗ Outgoing" }, theme::regular(12.5), c::MUTED);
-                p.text(Pos2::new(cols.inc + 8.0, y), Align2::LEFT_CENTER, cv.state.label(), theme::regular(12.5), c::MUTED);
-                p.text(Pos2::new(cols.publisher, y), Align2::LEFT_CENTER, format!("PID {}", cv.pid), theme::regular(12.5), c::FAINT);
-                p.text(Pos2::new(cols.version, y), Align2::LEFT_CENTER, format!("Port {}", cv.remote_port), theme::regular(12.5), c::FAINT);
-                theme::text(p, Pos2::new(cols.hosts + 20.0, y), &format!("{host}  ·  {}", cv.remote), theme::regular(12.5), c::TEXT, hosts_w - 30.0);
+                p.text(Pos2::new(cols.app + 48.0, y), Align2::LEFT_CENTER, if cv.inbound { "↘ Incoming" } else { "↗ Outgoing" }, theme::regular(12.5), c::muted());
+                p.text(Pos2::new(cols.inc + 8.0, y), Align2::LEFT_CENTER, cv.state.label(), theme::regular(12.5), c::muted());
+                p.text(Pos2::new(cols.publisher, y), Align2::LEFT_CENTER, format!("PID {}", cv.pid), theme::regular(12.5), c::faint());
+                p.text(Pos2::new(cols.version, y), Align2::LEFT_CENTER, format!("Port {}", cv.remote_port), theme::regular(12.5), c::faint());
+                theme::text(p, Pos2::new(cols.hosts + 20.0, y), &format!("{host}  ·  {}", cv.remote), theme::regular(12.5), c::text(), hosts_w - 30.0);
                 if cv.rate[0] > 0 {
-                    theme::text_right(p, Pos2::new(cols.down, y), &theme::rate(cv.rate[0] as f64), theme::regular(12.5), c::MUTED);
+                    theme::text_right(p, Pos2::new(cols.down, y), &theme::rate(cv.rate[0] as f64), theme::regular(12.5), c::muted());
                 }
                 if cv.rate[1] > 0 {
-                    theme::text_right(p, Pos2::new(cols.up, y), &theme::rate(cv.rate[1] as f64), theme::regular(12.5), c::MUTED);
+                    theme::text_right(p, Pos2::new(cols.up, y), &theme::rate(cv.rate[1] as f64), theme::regular(12.5), c::muted());
                 }
             }
             if !listening.is_empty() {
                 let ports: Vec<String> = listening.iter().take(12).map(|c| format!("{} {}", if c.proto == Proto::Tcp { "TCP" } else { "UDP" }, c.local_port)).collect();
                 let (r, _) = ui.allocate_exact_size(Vec2::new(width, SUB_H), Sense::hover());
                 ui.painter().rect_filled(r, CornerRadius::ZERO, Color32::from_rgb(0x17, 0x19, 0x1e));
-                ui.painter().text(Pos2::new(cols.app + 48.0, r.center().y), Align2::LEFT_CENTER, format!("Listening on {}", ports.join(", ")), theme::regular(12.5), c::FAINT);
+                ui.painter().text(Pos2::new(cols.app + 48.0, r.center().y), Align2::LEFT_CENTER, format!("Listening on {}", ports.join(", ")), theme::regular(12.5), c::faint());
             }
         }
     }
@@ -309,15 +309,15 @@ fn section(ui: &mut egui::Ui, width: f32, title: &str, count: usize, open: bool)
     let (r, resp) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::click());
     let p = ui.painter();
     if resp.hovered() {
-        p.rect_filled(r, CornerRadius::ZERO, c::HOVER);
+        p.rect_filled(r, CornerRadius::ZERO, c::hover());
     }
-    theme::glyph(p, Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(12.0)), if open { Glyph::ChevronDown } else { Glyph::Chevron }, c::MUTED);
-    let tr = p.text(Pos2::new(r.left() + 36.0, r.center().y), Align2::LEFT_CENTER, title, theme::semibold(14.5), c::TEXT);
-    p.text(Pos2::new(tr.right() + 8.0, r.center().y), Align2::LEFT_CENTER, count.to_string(), theme::regular(13.0), c::MUTED);
+    theme::glyph(p, Rect::from_center_size(Pos2::new(r.left() + 20.0, r.center().y), Vec2::splat(12.0)), if open { Glyph::ChevronDown } else { Glyph::Chevron }, c::muted());
+    let tr = p.text(Pos2::new(r.left() + 36.0, r.center().y), Align2::LEFT_CENTER, title, theme::semibold(14.5), c::text());
+    p.text(Pos2::new(tr.right() + 8.0, r.center().y), Align2::LEFT_CENTER, count.to_string(), theme::regular(13.0), c::muted());
     resp.clicked()
 }
 
 fn sep(ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(1.0, 48.0), Sense::hover());
-    ui.painter().rect_filled(r, CornerRadius::ZERO, c::BORDER);
+    ui.painter().rect_filled(r, CornerRadius::ZERO, c::border());
 }
