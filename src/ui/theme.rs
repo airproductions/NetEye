@@ -231,6 +231,8 @@ pub enum Glyph {
     Refresh,
     Check,
     Lock,
+    Export,
+    Columns,
     Calendar,
     BellPlus,
     TypeWeb,
@@ -470,6 +472,17 @@ pub fn glyph(p: &Painter, r: Rect, g: Glyph, color: Color32) {
         Glyph::TypeOther => {
             for x in [5.0, 10.0, 15.0] {
                 p.circle_filled(pt(x, 10.0), 1.4 * u, color);
+            }
+        }
+        Glyph::Export => {
+            // a tray with an arrow leaving it
+            line(&[(3.5, 11.5), (3.5, 16.5), (16.5, 16.5), (16.5, 11.5)]);
+            line(&[(10.0, 12.5), (10.0, 3.0)]);
+            line(&[(6.5, 6.5), (10.0, 3.0), (13.5, 6.5)]);
+        }
+        Glyph::Columns => {
+            for x in [3.0, 8.5, 14.0] {
+                p.rect_stroke(Rect::from_min_max(pt(x, 3.5), pt(x + 3.0, 16.5)), CornerRadius::same(1), s, StrokeKind::Middle);
             }
         }
     }
