@@ -28,7 +28,8 @@ pub struct FirewallPage {
     new_profile: Option<String>,
 }
 
-const DEFAULT_SORT: SortSpec = SortSpec { col: 0, desc: false };
+/// No saved sort: Active by traffic then name, Inactive by last seen. No header shows an arrow.
+const NATURAL: SortSpec = SortSpec { col: u8::MAX, desc: false };
 
 /// The sortable fields of one app row.
 struct FwRow {
@@ -42,10 +43,18 @@ struct FwRow {
     down: u64,
     up: u64,
     traffic: u64,
+    last_seen: i64,
 }
 
 /// Sorts one group (active or inactive) on its own; rows without a publisher or version go last.
-fn sort_group(rows: &mut [FwRow], spec: SortSpec) {
+fn sort_group(rows: &mut [FwRow], spec: SortSpec, live: bool) {
+    if spec.col == u8::MAX {
+        rows.sort_by(|a, b| {
+            let o = if live { b.traffic.cmp(&a.traffic) } else { b.last_seen.cmp(&a.last_seen) };
+            o.then_with(|| sort::cmp_text(&a.name, &b.name))
+        });
+        return;
+    }
     sort::apply(
         rows,
         spec,
@@ -101,9 +110,9 @@ impl FirewallPage {
         self.toolbar(ui, s, actions, full);
 
         let cols = Cols::new(full.left(), full.width());
-        let mut spec = s.store.data.settings.sort_for("firewall", DEFAULT_SORT);
-        if spec.col > 8 {
-            spec = DEFAULT_SORT;
+        let mut spec = s.store.data.settings.sort_for("firewall", NATURAL);
+        if spec.col > 8 && spec.col != u8::MAX {
+            spec = NATURAL;
         }
         let (hr, _) = ui.allocate_exact_size(Vec2::new(full.width(), 34.0), Sense::hover());
         ui.painter().rect_filled(hr, CornerRadius::ZERO, c::panel());
@@ -155,11 +164,12 @@ impl FirewallPage {
                 down: rate[0],
                 up: rate[1],
                 traffic: rate[0] + rate[1],
+                last_seen: a.last_seen,
             };
             if live { active.push(fw) } else { inactive.push(fw) }
         }
-        sort_group(&mut active, spec);
-        sort_group(&mut inactive, spec);
+        sort_group(&mut active, spec, true);
+        sort_group(&mut inactive, spec, false);
 
         // per-app sparkline series from the last minute of live samples
         let mut spark: HashMap<&str, (Vec<f64>, Vec<f64>)> = HashMap::new();
@@ -481,7 +491,7 @@ mod tests {
     use super::*;
 
     fn row(name: &str, publisher: Option<&str>) -> FwRow {
-        FwRow { key: name.to_string(), name: name.to_string(), publisher: publisher.map(String::from), version: None, block_in: false, block_out: false, hosts: 0, down: 0, up: 0, traffic: 0 }
+        FwRow { key: name.to_string(), name: name.to_string(), publisher: publisher.map(String::from), version: None, block_in: false, block_out: false, hosts: 0, down: 0, up: 0, traffic: 0, last_seen: 0 }
     }
 
     #[test]
@@ -489,13 +499,13 @@ mod tests {
         let mut active = vec![row("x", Some("Acme")), row("y", None)];
         let mut inactive = vec![row("z", Some("Zed"))];
         let spec = SortSpec { col: 3, desc: true };
-        sort_group(&mut active, spec);
-        sort_group(&mut inactive, spec);
+        sort_group(&mut active, spec, true);
+        sort_group(&mut inactive, spec, false);
         let names = |v: &[FwRow]| v.iter().map(|r| r.name.clone()).collect::<Vec<_>>();
         assert_eq!(names(&active), ["x", "y"], "publisher desc, missing publisher last");
         assert_eq!(names(&inactive), ["z"]);
         let spec = SortSpec { col: 3, desc: false };
-        sort_group(&mut active, spec);
+        sort_group(&mut active, spec, true);
         assert_eq!(names(&active), ["x", "y"], "missing publisher last ascending too");
     }
 
@@ -503,7 +513,21 @@ mod tests {
     fn blocked_sorts_before_allowed() {
         let mut v = vec![row("a", None), row("b", None)];
         v[1].block_out = true;
-        sort_group(&mut v, SortSpec { col: 2, desc: false });
+        sort_group(&mut v, SortSpec { col: 2, desc: false }, true);
         assert_eq!(v[0].name, "b");
+    }
+
+    #[test]
+    fn firewall_natural_default_matches_base() {
+        let mut active = vec![row("a", None), row("b", None)];
+        active[0].traffic = 5;
+        active[1].traffic = 9;
+        let mut inactive = vec![row("c", None), row("d", None)];
+        inactive[0].last_seen = 100;
+        inactive[1].last_seen = 300;
+        sort_group(&mut active, NATURAL, true);
+        sort_group(&mut inactive, NATURAL, false);
+        assert_eq!(active.iter().map(|r| r.traffic).collect::<Vec<_>>(), [9, 5]);
+        assert_eq!(inactive.iter().map(|r| r.last_seen).collect::<Vec<_>>(), [300, 100]);
     }
 }
